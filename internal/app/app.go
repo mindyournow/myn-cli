@@ -1,9 +1,8 @@
 package app
 
 import (
-	"fmt"
-
 	"github.com/mindyournow/myn-cli/internal/api"
+	"github.com/mindyournow/myn-cli/internal/auth"
 	"github.com/mindyournow/myn-cli/internal/config"
 )
 
@@ -11,77 +10,89 @@ import (
 type App struct {
 	Config *config.Config
 	Client *api.Client
+	Auth   *auth.Manager
 }
 
+// New creates a new App instance.
 func New() *App {
 	cfg := config.Load()
-	client := api.NewClient(cfg.BaseURL)
+	client := api.NewClient(cfg.BaseURL())
+	authManager := auth.NewManager(cfg.BaseURL())
+
 	return &App{
 		Config: cfg,
 		Client: client,
+		Auth:   authManager,
 	}
 }
 
-func (a *App) Login(device bool) error {
+// Login performs authentication based on flags.
+func (a *App) Login(device bool, apiKey string) error {
+	if apiKey != "" {
+		return a.Auth.LoginWithAPIKey(apiKey)
+	}
 	if device {
-		fmt.Println("Device authorization flow not yet implemented.")
-		return nil
+		return a.loginDevice()
 	}
-	fmt.Println("Browser-based login not yet implemented.")
-	return nil
+	return a.Auth.LoginWithOAuth()
 }
 
+// loginDevice performs device authorization flow (not yet implemented).
+func (a *App) loginDevice() error {
+	return ErrNotImplemented
+}
+
+// Logout clears stored credentials.
 func (a *App) Logout() error {
-	fmt.Println("Logout not yet implemented.")
-	return nil
+	return a.Auth.Logout()
 }
 
+// InboxAdd adds an item to the inbox.
 func (a *App) InboxAdd(title string) error {
-	fmt.Printf("Inbox add not yet implemented: %s\n", title)
-	return nil
+	return ErrNotImplemented
 }
 
+// InboxList lists inbox items.
 func (a *App) InboxList() error {
-	fmt.Println("Inbox list not yet implemented.")
-	return nil
+	return ErrNotImplemented
 }
 
+// NowList shows current focus/now items.
 func (a *App) NowList() error {
-	fmt.Println("Now list not yet implemented.")
-	return nil
+	return ErrNotImplemented
 }
 
+// NowFocus enters focus mode.
 func (a *App) NowFocus() error {
-	fmt.Println("Now focus not yet implemented.")
-	return nil
+	return ErrNotImplemented
 }
 
+// TaskDone marks a task as done.
 func (a *App) TaskDone(id string) error {
-	fmt.Printf("Task done not yet implemented: %s\n", id)
-	return nil
+	return ErrNotImplemented
 }
 
+// TaskSnooze snoozes a task.
 func (a *App) TaskSnooze(id string) error {
-	fmt.Printf("Task snooze not yet implemented: %s\n", id)
-	return nil
+	return ErrNotImplemented
 }
 
+// ReviewDaily runs the daily review.
 func (a *App) ReviewDaily() error {
-	fmt.Println("Daily review not yet implemented.")
-	return nil
+	return ErrNotImplemented
 }
 
+// RunTUI launches the TUI.
 func (a *App) RunTUI() error {
-	fmt.Println("TUI not yet implemented.")
-	return nil
+	return ErrNotImplemented
 }
 
+// PluginList lists available plugins.
 func (a *App) PluginList() error {
-	fmt.Println("Plugin list not yet implemented.")
-	return nil
+	return ErrNotImplemented
 }
 
+// PluginEnable enables a plugin.
 func (a *App) PluginEnable(name string) error {
-	fmt.Printf("Plugin enable not yet implemented: %s\n", name)
-	return nil
+	return ErrNotImplemented
 }

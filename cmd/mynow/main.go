@@ -66,10 +66,12 @@ func newLoginCmd(a *app.App) *cobra.Command {
 		Short: "Authenticate with MYN backend",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			device, _ := cmd.Flags().GetBool("device")
-			return a.Login(device)
+			apiKey, _ := cmd.Flags().GetString("api-key")
+			return a.Login(device, apiKey)
 		},
 	}
 	cmd.Flags().Bool("device", false, "Use device authorization flow (headless environments)")
+	cmd.Flags().String("api-key", "", "Authenticate with an API key")
 	return cmd
 }
 

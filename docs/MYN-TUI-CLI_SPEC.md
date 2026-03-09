@@ -1659,7 +1659,7 @@ Output:
 ### 4.25 Export Commands
 
 Export your MYN data in JSON, CSV, or iCal format. Exports are async jobs; download when complete.
-Export files are retained for 30 days.
+Export files are retained for 7 days.
 
 #### `mynow export`
 
@@ -1683,7 +1683,7 @@ Output:
   ✓ Export requested. Job ID: exp-abc123
     Check status: mynow export list
     Download when ready: mynow export download exp-abc123
-    Files retained for 30 days.
+    Files retained for 7 days.
 ```
 
 #### `mynow export list`
@@ -1797,13 +1797,13 @@ Opening billing portal in browser...
 #### `mynow account delete`
 
 Request account deletion. Sends a confirmation email; account is permanently deleted after
-a 14-day grace period.
+a 30-day grace period.
 
 ```
 mynow account delete [--immediate]
 
 Output:
-  WARNING: All your data will be permanently deleted in 14 days.
+  WARNING: All your data will be permanently deleted after a 30-day grace period.
   This cannot be undone.
 
   Type your email to confirm: john@example.com
@@ -1830,7 +1830,7 @@ mynow account delete status
 
 Output:
   Deletion requested:   March 9, 2026
-  Scheduled for:        March 23, 2026  (14 days remaining)
+  Scheduled for:        April 8, 2026  (30 days remaining)
   Status:               Awaiting email confirmation
 ```
 
@@ -1867,12 +1867,11 @@ Flags:
   --rate-per-hour <n>    Per-hour rate limit (default: 1000)
 
 Available scopes:
-  tasks:list    tasks:view    tasks:create    tasks:update    tasks:delete    tasks:*
-  habits:list   habits:view   habits:*
-  calendar:list calendar:*
-  timers:list   timers:*
-  grocery:list  grocery:*
-  read:all      write:all
+  tasks:list    tasks:view    tasks:create    tasks:update    tasks:delete    tasks:calendar
+  habits:list   habits:view   habits:reminders
+  schedules:list  schedules:view  schedules:create  schedules:update  schedules:delete
+  projects:list   projects:view   projects:create   projects:update   projects:delete
+  user:read     admin:full    agent:full
 
 Examples:
   mynow apikey create "Shell scripts" --scopes "tasks:list,tasks:view"
@@ -2016,9 +2015,37 @@ Output:
   You:  What about the production bug?
 ```
 
+#### `mynow ai conversations search <query>`
+
+Search conversations by title.
+
+```
+mynow ai conversations search <query> [flags]
+
+Flags:
+  --limit <n>     Number to return (default: 20)
+
+Output:
+  CONVERSATION SEARCH — "planning"
+
+  def456   Weekly planning session    12 messages   Mar 7
+  jkl012   Q1 planning discussion      4 messages   Feb 28
+```
+
+#### `mynow ai conversations count`
+
+Show conversation statistics.
+
+```
+mynow ai conversations count
+
+Output:
+  Conversations: 23 total  (21 chat, 2 voice)
+```
+
 #### `mynow ai conversations archive <id>`
 
-Archive a conversation.
+Archive a conversation (soft-archive; shown with `--archived`).
 
 ```
 mynow ai conversations archive <id>
@@ -3632,11 +3659,13 @@ Complete mapping of CLI commands to MYN API endpoints.
 | `apikey list` | GET | `/api/v1/api-keys` |
 | `apikey create` | POST | `/api/v1/api-keys` |
 | `apikey show <id>` | GET | `/api/v1/api-keys/{id}` |
-| `apikey update <id>` | PUT | `/api/v1/api-keys/{id}` |
+| `apikey update <id>` | PATCH | `/api/v1/api-keys/{id}` |
 | `apikey revoke <id>` | DELETE | `/api/v1/api-keys/{id}` |
 | `ai chat` | POST | `/api/ai/chat/stream` (SSE streaming) |
 | `ai conversations` | GET | `/api/v1/ai/conversations` |
 | `ai conversations show <id>` | GET | `/api/v1/ai/conversations/{id}/messages` |
+| `ai conversations search <q>` | GET | `/api/v1/ai/conversations/search` |
+| `ai conversations count` | GET | `/api/v1/ai/conversations/count` |
 | `ai conversations archive <id>` | PATCH | `/api/v1/ai/conversations/{id}/status` |
 | `ai conversations delete <id>` | DELETE | `/api/v1/ai/conversations/{id}` |
 | `ai conversations continue <id>` | POST | `/api/v1/ai/conversations/{id}/continue` |
@@ -3820,16 +3849,17 @@ Reference for all notification event types that can appear in `mynow notificatio
 
 | Event Type | Trigger | Related Item |
 |------------|---------|--------------|
-| `COMMENT` | New comment on a task you own or share | task |
-| `MENTION` | @-mentioned in a comment | task |
-| `TASK_ASSIGNED` | A task was shared with you | task |
-| `TASK_COMPLETED` | A shared task was completed | task |
-| `TASK_UPDATE` | A task you shared was updated | task |
+| `COMMENT_ADDED` | New comment on a task you own or share | task |
+| `TASK_SHARED` | A task has been shared with you (pending) | task |
+| `TASK_SHARE_ACCEPTED` | Your share invitation was accepted | task |
+| `TASK_SHARE_DECLINED` | Your share invitation was declined | task |
+| `ACHIEVEMENT_UNLOCKED` | A gamification achievement was unlocked | achievement |
 | `HOUSEHOLD_INVITE` | You received a household invitation | household |
 | `HOUSEHOLD_MEMBER_JOINED` | Someone joined your household | household |
 | `CHORE_ROTATION` | A chore rotation has advanced to you | chore |
 | `AI_MESSAGE` | Kaia sent a proactive message | conversation |
-| `TIMER_COMPLETE` | A countdown timer or alarm fired | timer |
+| `TIMER_COMPLETE` | A countdown timer completed | timer |
+| `ALARM` | An alarm timer fired | timer |
 | `TASK_REMINDER` | A task-linked reminder fired | task |
 
 ---

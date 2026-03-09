@@ -1,0 +1,2404 @@
+# MYN CLI + TUI — Complete Specification
+
+> Binary name: `mynow`
+> Project: `myn-cli` (github.com/mindyournow/myn-cli)
+> License: MIT
+
+---
+
+## Table of Contents
+
+1. [Architecture](#1-architecture)
+2. [Authentication](#2-authentication)
+3. [Configuration](#3-configuration)
+4. [CLI Command Reference](#4-cli-command-reference)
+5. [TUI Specification](#5-tui-specification)
+6. [Global Keybindings (TUI)](#6-global-keybindings-tui)
+7. [Search System](#7-search-system)
+8. [Help System](#8-help-system)
+9. [Output Formatting](#9-output-formatting)
+10. [Plugin System](#10-plugin-system)
+11. [Shell Completions](#11-shell-completions)
+12. [Man Page](#12-man-page)
+13. [Error Handling](#13-error-handling)
+14. [Integration Testing](#14-integration-testing)
+15. [Distribution & Packaging](#15-distribution--packaging)
+
+---
+
+## 1. Architecture
+
+### 1.1 Binary Structure
+
+Single static binary `mynow` provides both CLI and TUI modes. Default invocation (no subcommand) launches the TUI.
+
+```
+mynow              → launches TUI
+mynow tui          → launches TUI (explicit)
+mynow <command>    → runs CLI command, prints output, exits
+```
+
+### 1.2 Internal Layers
+
+```
+cmd/mynow/          CLI entry point (Cobra root + subcommands)
+internal/
+  app/              Application layer — shared by CLI and TUI
+    tasks.go        Task operations (list, create, complete, archive, etc.)
+    habits.go       Habit operations (streaks, skip, chains, schedule)
+    chores.go       Chore operations (list, schedule, complete)
+    inbox.go        Inbox operations (add, list, process)
+    compass.go      Compass/briefing operations
+    calendar.go     Calendar operations
+    timers.go       Timer operations (countdown, alarm, pomodoro)
+    lists.go        Grocery list operations
+    projects.go     Project management
+    planning.go     AI planning / auto-schedule
+    search.go       Unified search
+    profile.go      User profile, goals, preferences
+    memory.go       Memory store/recall
+    household.go    Household + members
+  api/              HTTP client (one method per API endpoint)
+    client.go       Base HTTP client, auth header injection, retries
+    tasks.go        /api/v2/unified-tasks endpoints
+    habits.go       /api/v1/habit-chains endpoints
+    chores.go       /api/v2/chores endpoints
+    compass.go      /api/v2/compass endpoints
+    calendar.go     /api/v2/calendar endpoints
+    timers.go       /api/v2/timers endpoints
+    lists.go        /api/v1/households/.../grocery-list endpoints
+    projects.go     /api/project endpoints
+    planning.go     /api/schedules endpoints
+    search.go       /api/v2/search endpoints
+    profile.go      /api/v1/customers endpoints
+    memory.go       /api/v1/customers/memories endpoints
+    household.go    /api/v1/households endpoints
+  auth/             OAuth PKCE + device flow + credential storage
+    oauth.go        Browser-based PKCE flow
+    device.go       Device authorization flow
+    keyring.go      Linux Secret Service (GNOME Keyring / KDE Wallet)
+    apikey.go       API key storage (alternative to OAuth)
+    tokens.go       Token refresh, in-memory access token cache
+  config/           Configuration loading
+    config.go       XDG config dirs, env vars, YAML config file
+  output/           Output formatting
+    formatter.go    Text / JSON / table / quiet modes
+    table.go        Column-aligned text tables
+    color.go        ANSI color support with --no-color
+    markdown.go     Glamour-based markdown rendering
+  tui/              Bubble Tea TUI
+    app.go          Root Bubble Tea model, screen router
+    screens/        One file per screen
+      now.go
+      inbox.go
+      next_actions.go
+      habits.go
+      chores.go
+      calendar.go
+      compass.go
+      timers.go
+      grocery.go
+      projects.go
+      task_detail.go
+      search.go
+      settings.go
+      help.go
+    components/     Reusable TUI components
+      task_list.go    Filterable, sortable task list
+      task_row.go     Single task row rendering
+      priority_badge.go  Priority zone indicator
+      streak_bar.go   Habit streak visualization
+      timer_display.go  Countdown/pomodoro display
+      input.go        Text input field
+      confirm.go      Confirmation dialog
+      toast.go        Transient notification
+      statusbar.go    Bottom status bar
+      tabs.go         Tab bar navigation
+      modal.go        Modal overlay
+      calendar_grid.go  Week/month calendar grid
+plugins/            Plugin interface
+  plugin.go         Plugin loading, registration, command injection
+test/
+  integration/      Docker Compose integration tests
+```
+
+### 1.3 Data Flow
+
+```
+User Input → Cobra (CLI) or Bubble Tea (TUI)
+          → internal/app (business logic)
+          → internal/api (HTTP calls)
+          → MYN Backend (HTTPS)
+          → Response → output/formatter (CLI) or TUI model update
+```
+
+### 1.4 Concurrency
+
+- API calls are sequential by default (one at a time per command)
+- TUI may fire background API calls (e.g., refresh timer, polling compass status)
+- Context cancellation on Ctrl+C for all in-flight HTTP requests
+
+---
+
+## 2. Authentication
+
+### 2.1 Auth Methods (in priority order)
+
+1. **API Key** (`mynow login --api-key`) — simplest, recommended for scripting
+2. **OAuth 2.0 PKCE** (`mynow login`) — browser-based, for interactive use
+3. **Device Authorization** (`mynow login --device`) — for headless/SSH environments
+
+### 2.2 API Key Flow
+
+```
+mynow login --api-key
+> Enter your MYN API key: myn_xxxx_...
+✓ Authenticated as John Doe (john@example.com)
+  API key stored in keyring.
+```
+
+- Validates key via `GET /api/v1/customers/me`
+- Stores in Linux Secret Service under service=`mynow`, account=`api-key`
+- All subsequent requests use `X-API-KEY` header
+
+### 2.3 OAuth 2.0 PKCE Flow
+
+```
+mynow login
+> Opening browser for authentication...
+> Waiting for callback on http://localhost:19283/callback
+✓ Authenticated as John Doe (john@example.com)
+  Refresh token stored in keyring.
+```
+
+- Generates code verifier + challenge
+- Opens browser to MYN auth endpoint
+- Starts local HTTP server on ephemeral port to receive callback
+- Exchanges authorization code for access + refresh tokens
+- Stores refresh token in keyring; access token in memory only
+- Auto-refreshes access token on 401
+
+### 2.4 Device Authorization Flow
+
+```
+mynow login --device
+> Visit: https://mindyournow.com/device
+> Enter code: ABCD-1234
+> Waiting for authorization... (polling every 5s)
+✓ Authenticated as John Doe (john@example.com)
+```
+
+- Requests device code from MYN backend
+- Polls token endpoint until authorized or expired
+- Same token storage as OAuth PKCE
+
+### 2.5 Credential Storage
+
+| Backend | When Used |
+|---------|-----------|
+| GNOME Keyring | GNOME desktop detected |
+| KDE Wallet | KDE desktop detected |
+| `pass` (password-store) | `MYNOW_KEYRING=pass` env var |
+| Encrypted file | Fallback: `~/.config/mynow/credentials.enc` (AES-256-GCM, key derived from machine ID) |
+
+### 2.6 Session Commands
+
+```
+mynow login                     # OAuth PKCE (default)
+mynow login --api-key           # API key auth
+mynow login --device            # Device authorization
+mynow logout                    # Clear all stored credentials
+mynow whoami                    # Show current user info
+mynow auth status               # Show auth method, token expiry, etc.
+mynow auth refresh              # Force token refresh
+```
+
+---
+
+## 3. Configuration
+
+### 3.1 Config File
+
+Location: `$XDG_CONFIG_HOME/mynow/config.yaml` (default: `~/.config/mynow/config.yaml`)
+
+```yaml
+# MYN CLI configuration
+api:
+  url: https://api.mindyournow.com  # Override with MYN_API_URL env var
+  timeout: 30s
+  retries: 3
+
+auth:
+  method: api-key                    # api-key | oauth | device
+  keyring: auto                      # auto | gnome | kde | pass | file
+
+display:
+  color: auto                        # auto | always | never
+  date_format: relative              # relative | iso | short (Mar 9) | long (March 9, 2026)
+  time_format: 12h                   # 12h | 24h
+  default_output: text               # text | json | table
+
+tui:
+  theme: dark                        # dark | light | auto
+  refresh_interval: 30s              # Background data refresh
+  vim_keys: true                     # j/k navigation
+  mouse: false                       # Mouse support
+  animations: true                   # Completion animations, transitions
+
+defaults:
+  priority: OPPORTUNITY_NOW          # Default priority for new tasks
+  task_type: TASK                    # Default type for new items
+  calendar_days: 7                   # Default calendar lookahead
+  habit_schedule_days: 7             # Default habit schedule lookahead
+```
+
+### 3.2 Environment Variables
+
+| Variable | Description | Overrides |
+|----------|-------------|-----------|
+| `MYN_API_URL` | Backend URL | `api.url` |
+| `MYN_API_KEY` | API key (avoids keyring) | stored credential |
+| `MYNOW_CONFIG` | Config file path | default path |
+| `MYNOW_KEYRING` | Keyring backend | `auth.keyring` |
+| `NO_COLOR` | Disable color (standard) | `display.color` |
+| `MYNOW_DEBUG` | Enable debug logging | — |
+
+### 3.3 Config Commands
+
+```
+mynow config show                   # Print resolved config (redacts secrets)
+mynow config set <key> <value>      # Set a config value
+mynow config get <key>              # Get a config value
+mynow config reset                  # Reset to defaults
+mynow config path                   # Print config file path
+```
+
+---
+
+## 4. CLI Command Reference
+
+### 4.1 Global Flags
+
+Every command supports these flags:
+
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--json` | `-j` | Output in JSON format |
+| `--quiet` | `-q` | Suppress non-essential output |
+| `--no-color` | | Disable color output |
+| `--api-url <url>` | | Override API URL for this command |
+| `--debug` | | Enable debug logging |
+| `--help` | `-h` | Show help for command |
+
+### 4.2 Task Commands
+
+#### `mynow task list`
+
+List tasks with filtering and sorting.
+
+```
+mynow task list [flags]
+
+Flags:
+  --priority <zone>     Filter: critical, opportunity, horizon, parking
+  --type <type>         Filter: task, habit, chore (default: all)
+  --project <name|id>   Filter by project
+  --completed           Include completed tasks
+  --archived            Include archived tasks
+  --today               Only tasks with startDate = today
+  --overdue             Only tasks past their startDate
+  --sort <field>        Sort by: priority, date, title, created (default: priority)
+  --reverse             Reverse sort order
+  --limit <n>           Max results (default: 50)
+
+Examples:
+  mynow task list                         # All active tasks
+  mynow task list --priority critical     # Critical Now only
+  mynow task list --today                 # Today's tasks
+  mynow task list --type habit            # Habits only
+  mynow task list --project "Q1 Planning" # Tasks in a project
+  mynow task list --json | jq '.[] | .title'
+```
+
+Output format (text):
+
+```
+ CRITICAL NOW
+   ● Prepare quarterly report          2h    Mar 9    Q1 Planning
+   ● Fix production bug                30m   Mar 9    —
+
+ OPPORTUNITY NOW
+   ○ Review pull requests              1h    Mar 9    Engineering
+   ○ Update team wiki                  45m   Mar 10   —
+
+ OVER THE HORIZON
+   ◌ Research new frameworks           —     Mar 15   R&D
+```
+
+#### `mynow task add <title>`
+
+Create a new task.
+
+```
+mynow task add <title> [flags]
+
+Flags:
+  --priority <zone>     Priority: critical, opportunity, horizon, parking (default: from config)
+  --date <date>         Start date: today, tomorrow, monday, 2026-03-15 (default: today)
+  --duration <dur>      Duration: 30m, 1h, 2h30m
+  --project <name|id>   Assign to project
+  --description <text>  Description text
+  --type <type>         task, habit, chore (default: task)
+  --recurrence <rule>   RRULE for habits/chores: daily, weekly, "FREQ=WEEKLY;BYDAY=MO,WE,FR"
+
+Examples:
+  mynow task add "Call Sam"
+  mynow task add "Prepare report" --priority critical --duration 2h --date today
+  mynow task add "Morning meditation" --type habit --recurrence daily --duration 15m
+  mynow task add "Take out trash" --type chore --recurrence "FREQ=WEEKLY;BYDAY=TU,FR"
+```
+
+#### `mynow task show <id>`
+
+Show detailed task information.
+
+```
+mynow task show <id>
+
+Output:
+  Title:       Prepare quarterly report
+  ID:          550e8400-...
+  Type:        TASK
+  Priority:    CRITICAL NOW
+  Start Date:  2026-03-09
+  Duration:    2h
+  Project:     Q1 Planning
+  Description: Q1 financials and projections
+  Created:     2026-03-01
+  Status:      Active
+```
+
+#### `mynow task edit <id>`
+
+Edit a task's fields.
+
+```
+mynow task edit <id> [flags]
+
+Flags:
+  --title <text>        New title
+  --priority <zone>     New priority
+  --date <date>         New start date
+  --duration <dur>      New duration
+  --project <name|id>   Move to project (use "" to unassign)
+  --description <text>  New description
+
+Examples:
+  mynow task edit abc123 --priority critical
+  mynow task edit abc123 --date tomorrow --duration 1h
+  mynow task edit abc123 --project "Home Renovation"
+```
+
+#### `mynow task done <id>`
+
+Mark a task as completed.
+
+```
+mynow task done <id>
+
+Output:
+  ✓ Completed: "Prepare quarterly report"
+```
+
+#### `mynow task archive <id>`
+
+Archive a completed task.
+
+```
+mynow task archive <id>
+
+Output:
+  ✓ Archived: "Prepare quarterly report"
+```
+
+#### `mynow task delete <id>`
+
+Delete a task (asks for confirmation unless --force).
+
+```
+mynow task delete <id> [--force]
+```
+
+#### `mynow task snooze <id>`
+
+Reschedule a task to a later date.
+
+```
+mynow task snooze <id> [flags]
+
+Flags:
+  --date <date>         Target date (default: tomorrow)
+  --days <n>            Snooze by N days
+
+Examples:
+  mynow task snooze abc123                 # → tomorrow
+  mynow task snooze abc123 --days 3        # → 3 days from now
+  mynow task snooze abc123 --date monday   # → next Monday
+```
+
+#### `mynow task move <id> <project>`
+
+Move a task to a project.
+
+```
+mynow task move abc123 "Q1 Planning"
+```
+
+### 4.3 Inbox Commands
+
+The inbox is a special view of tasks with no priority assigned, or tasks explicitly in the inbox zone.
+
+#### `mynow inbox list`
+
+```
+mynow inbox list
+
+Output:
+  Inbox (3 items)
+  1. Call Sam                         added 2h ago
+  2. Look into new health insurance   added yesterday
+  3. Fix leaky faucet                 added Mar 7
+```
+
+#### `mynow inbox add <title>`
+
+Quick-add an item to the inbox (no priority, today's date, type=TASK).
+
+```
+mynow inbox add "Call Sam"
+mynow inbox add "Buy groceries" --description "Need milk and eggs"
+```
+
+#### `mynow inbox process`
+
+Interactive processing — walks through each inbox item and asks for priority assignment.
+
+```
+mynow inbox process
+
+> "Call Sam" — added 2h ago
+  [c]ritical  [o]pportunity  [h]orizon  [p]arking  [s]kip  [d]elete
+  > c
+  ✓ "Call Sam" → Critical Now
+
+> "Look into new health insurance" — added yesterday
+  [c]ritical  [o]pportunity  [h]orizon  [p]arking  [s]kip  [d]elete
+  > h
+  ✓ "Look into new health insurance" → Over The Horizon
+
+  Processed 2 of 3 items. 1 remaining.
+```
+
+#### `mynow inbox count`
+
+```
+mynow inbox count
+3
+```
+
+### 4.4 Now (Focus) Commands
+
+The "Now" view shows what to focus on right now — Critical Now tasks + today's calendar.
+
+#### `mynow now`
+
+```
+mynow now
+
+  🎯 NOW — Monday, March 9
+
+  FOCUS
+    ● Prepare quarterly report     2h     Q1 Planning
+    ● Fix production bug           30m    —
+
+  UPCOMING
+    09:00  Team Standup             30m    Conference Room B
+    14:00  1:1 with Manager         30m    Zoom
+
+  HABITS DUE
+    ◆ Morning meditation           15m    🔥 45-day streak
+    ◆ Read 30 minutes              30m    🔥 12-day streak
+```
+
+#### `mynow now focus`
+
+Set or show the current focus task.
+
+```
+mynow now focus                    # Show current focus
+mynow now focus <id>               # Set focus to task
+mynow now focus --clear            # Clear focus
+```
+
+### 4.5 Compass (Briefing) Commands
+
+#### `mynow compass`
+
+Show the latest compass briefing.
+
+```
+mynow compass
+
+Output: (renders briefing summary as markdown via Glamour)
+```
+
+#### `mynow compass generate`
+
+Generate a new compass briefing.
+
+```
+mynow compass generate [flags]
+
+Flags:
+  --context <text>        Context for the AI (e.g., "busy morning, low energy")
+  --focus <areas>         Comma-separated focus areas
+
+Examples:
+  mynow compass generate
+  mynow compass generate --context "Working from home" --focus "health,deadlines"
+```
+
+#### `mynow compass correct`
+
+Submit a mid-day correction.
+
+```
+mynow compass correct <type> [flags]
+
+Types: completed, missed, rescheduled, added, priority-changed, other
+
+Flags:
+  --task <id>             Related task ID
+  --reason <text>         Why the correction
+
+Examples:
+  mynow compass correct completed --task abc123 --reason "Finished early"
+  mynow compass correct priority-changed --task abc123
+```
+
+#### `mynow compass complete`
+
+End the current compass session.
+
+```
+mynow compass complete [flags]
+
+Flags:
+  --summary <text>        Session summary
+  --decisions <list>      Comma-separated key decisions
+
+Examples:
+  mynow compass complete --summary "Productive day, cleared all critical items"
+```
+
+#### `mynow compass status`
+
+Show current compass session state.
+
+```
+mynow compass status
+
+Output:
+  Session: active (started 8:30 AM)
+  Briefing ID: 550e8400-...
+  Pending corrections: 2
+  Last briefing: 8:30 AM today
+```
+
+### 4.6 Habit Commands
+
+#### `mynow habit list`
+
+```
+mynow habit list [flags]
+
+Flags:
+  --due                   Only habits due today
+  --schedule [days]       Show upcoming schedule (default: 7 days)
+
+Output:
+  HABITS
+  ◆ Morning meditation    daily     🔥 45    15m    due today
+  ◆ Read 30 minutes       daily     🔥 12    30m    due today
+  ◆ Gym workout           MWF       🔥 8     1h     due Wed
+  ◆ Weekly review          weekly    🔥 3     30m    due Sun
+```
+
+#### `mynow habit done <id>`
+
+Complete a habit for today. Uses the same `POST /complete` endpoint as tasks.
+
+```
+mynow habit done abc123
+
+Output:
+  ✓ Completed: "Morning meditation"
+    Streak: 46 days 🔥
+```
+
+#### `mynow habit skip <id>`
+
+Skip a habit without breaking the streak.
+
+```
+mynow habit skip <id> [flags]
+
+Flags:
+  --reason <text>         Reason for skipping
+  --date <date>           Date to skip (default: today)
+
+Examples:
+  mynow habit skip abc123 --reason "Sick day"
+```
+
+#### `mynow habit streak <id>`
+
+Show detailed streak information.
+
+```
+mynow habit streak abc123 [--history]
+
+Output:
+  Morning meditation
+  Current streak:  45 days 🔥
+  Longest streak:  120 days
+  Total completions: 892
+  Last completed:  today, 7:15 AM
+
+  --history flag shows day-by-day grid:
+  Mar:  ✓✓✓✓✓✓✓✓✓  (9/9 so far)
+  Feb:  ✓✓✓✓✓✓✓✓✓✓✓✓✓✓✓✓✓✓✓✓✓✓✓✓✓✓✓✓  (28/28)
+  Jan:  ✓✓✓✓✓✓✓✓✓✓✓✓✓✓✓✓✓✓✓✓✓✓✓✓✓✓✓✓✓✓✓  (31/31)
+```
+
+#### `mynow habit chains`
+
+List habit chains.
+
+```
+mynow habit chains
+
+Output:
+  Morning Routine (4 habits)
+    1. Morning meditation    15m
+    2. Journal               10m
+    3. Exercise              30m
+    4. Healthy breakfast     20m
+```
+
+#### `mynow habit schedule`
+
+Show upcoming habit schedule.
+
+```
+mynow habit schedule [--days <n>]
+
+Output:
+  Mon Mar 9
+    ◆ Morning meditation    15m    ✓ done
+    ◆ Read 30 minutes       30m    ○ pending
+    ◆ Gym workout           1h     ○ pending
+
+  Tue Mar 10
+    ◆ Morning meditation    15m    ○ pending
+    ◆ Read 30 minutes       30m    ○ pending
+```
+
+#### `mynow habit reminders`
+
+Manage habit reminders.
+
+```
+mynow habit reminders                          # List all reminders
+mynow habit reminders <id>                     # Show reminder for habit
+mynow habit reminders <id> --enable --time 07:30   # Set reminder
+mynow habit reminders <id> --disable           # Disable reminder
+```
+
+### 4.7 Chore Commands
+
+#### `mynow chore list`
+
+```
+mynow chore list [flags]
+
+Flags:
+  --assigned-to <name>    Filter by assignee
+  --due                   Only chores due today
+
+Output:
+  CHORES — Taylor Family
+  ▪ Take out trash       Tue/Fri    Alex     10m    due tomorrow
+  ▪ Vacuum living room   weekly     Jordan   30m    due Sat
+  ▪ Clean kitchen        daily      Riley    20m    due today
+```
+
+#### `mynow chore done <id>`
+
+```
+mynow chore done <id> [--note <text>]
+
+Output:
+  ✓ Completed: "Take out trash"
+    Next due: Friday, March 13
+```
+
+#### `mynow chore schedule`
+
+```
+mynow chore schedule [--date <date>] [--week]
+
+Output:
+  Mon Mar 9
+    ▪ Clean kitchen        Riley     20m    ○ pending
+  Tue Mar 10
+    ▪ Take out trash       Alex      10m    ○ pending
+    ▪ Clean kitchen        Jordan    20m    ○ pending
+```
+
+### 4.8 Calendar Commands
+
+#### `mynow calendar`
+
+```
+mynow calendar [flags]
+
+Flags:
+  --date <date>           Specific date (default: today)
+  --days <n>              Number of days to show (default: from config)
+  --week                  Show current week
+
+Output:
+  Monday, March 9
+    09:00 - 09:30  Team Standup         Conference Room B
+    14:00 - 14:30  1:1 with Manager     Zoom
+    (all day)      Mom's Birthday
+
+  Tuesday, March 10
+    10:00 - 11:00  Sprint Planning      Google Meet
+```
+
+#### `mynow calendar add`
+
+```
+mynow calendar add <title> [flags]
+
+Flags:
+  --start <datetime>      Start time (required for non-all-day)
+  --end <datetime>        End time
+  --date <date>           Date for all-day events
+  --all-day               All-day event
+  --location <text>       Location
+  --attendees <emails>    Comma-separated attendee emails
+  --description <text>    Description
+  --recurrence <rule>     RRULE for recurring events
+
+Examples:
+  mynow calendar add "Lunch with Alex" --start "2026-03-10T12:00" --end "2026-03-10T13:00"
+  mynow calendar add "Team offsite" --date 2026-03-15 --all-day
+```
+
+#### `mynow calendar delete <id>`
+
+```
+mynow calendar delete <id> [--force]
+```
+
+#### `mynow calendar decline <id>`
+
+Decline a meeting invitation.
+
+```
+mynow calendar decline <id>
+```
+
+#### `mynow calendar skip <id>`
+
+Mark a meeting as skipped (MYN-specific, not calendar deletion).
+
+```
+mynow calendar skip <id>
+```
+
+### 4.9 Timer Commands
+
+#### `mynow timer list`
+
+```
+mynow timer list
+
+Output:
+  ACTIVE TIMERS
+  ⏱  Focus time           COUNTDOWN   14:32 remaining   RUNNING
+  ⏱  Deep work block      POMODORO    Session 2/4       WORK PHASE  18:45 remaining
+```
+
+#### `mynow timer start`
+
+```
+mynow timer start <duration> [flags]
+
+Flags:
+  --label <text>          Timer label
+  --type <type>           countdown (default), pomodoro
+
+Duration formats: 25m, 1h, 1h30m, 90s
+
+Examples:
+  mynow timer start 25m                           # 25-minute countdown
+  mynow timer start 25m --label "Focus time"
+```
+
+#### `mynow timer pomodoro`
+
+Start a Pomodoro session.
+
+```
+mynow timer pomodoro [flags]
+
+Flags:
+  --work <dur>            Work phase (default: 25m)
+  --break <dur>           Short break (default: 5m)
+  --long-break <dur>      Long break (default: 15m)
+  --sessions <n>          Sessions before long break (default: 4)
+  --auto-start            Auto-start next phase
+  --label <text>          Session label
+
+Examples:
+  mynow timer pomodoro                            # Standard 25/5/15/4
+  mynow timer pomodoro --work 50m --break 10m     # Custom durations
+```
+
+#### `mynow timer alarm`
+
+Set an alarm.
+
+```
+mynow timer alarm <time> [flags]
+
+Flags:
+  --label <text>          Alarm label
+  --recurrence <rule>     RRULE for repeating alarms
+
+Examples:
+  mynow timer alarm 07:00 --label "Wake up"
+  mynow timer alarm 08:30 --label "Standup" --recurrence "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR"
+```
+
+#### `mynow timer cancel <id>`
+
+```
+mynow timer cancel <id>
+```
+
+#### `mynow timer snooze <id>`
+
+```
+mynow timer snooze <id> [--minutes <n>]    # default: 5
+```
+
+### 4.10 Grocery List Commands
+
+#### `mynow grocery`
+
+```
+mynow grocery [list]
+
+Output:
+  GROCERY LIST — Taylor Family
+  ─────────────────────────────
+  Produce
+    □ Avocados (4)         ripe ones for guacamole
+    ☑ Bananas (1 bunch)
+
+  Dairy
+    □ Milk (1 gallon)
+    □ Eggs (1 dozen)
+
+  Bakery
+    □ Bread
+
+  3 unchecked, 1 checked
+```
+
+#### `mynow grocery add <item>`
+
+```
+mynow grocery add <item> [flags]
+
+Flags:
+  --category <cat>        Category (Produce, Dairy, Meat, etc.)
+  --quantity <qty>        Quantity description
+  --notes <text>          Notes
+
+Examples:
+  mynow grocery add "Avocados" --category Produce --quantity 4 --notes "ripe ones"
+  mynow grocery add "Milk" --category Dairy --quantity "1 gallon"
+```
+
+#### `mynow grocery add-bulk`
+
+Add multiple items at once.
+
+```
+mynow grocery add-bulk [flags]
+
+Flags:
+  --items <json>          JSON array of items
+  --stdin                 Read items from stdin (one per line, format: "name|category|quantity")
+
+Examples:
+  mynow grocery add-bulk --items '[{"name":"Milk","category":"Dairy"},{"name":"Bread","category":"Bakery"}]'
+  echo -e "Milk|Dairy|1 gallon\nBread|Bakery|" | mynow grocery add-bulk --stdin
+```
+
+#### `mynow grocery check <id>`
+
+Toggle an item's checked state.
+
+```
+mynow grocery check <id>
+```
+
+#### `mynow grocery clear`
+
+Clear checked items from the list.
+
+```
+mynow grocery clear [--force]
+```
+
+#### `mynow grocery convert`
+
+Convert grocery items to MYN tasks (for a shopping trip).
+
+```
+mynow grocery convert [flags]
+
+Flags:
+  --priority <zone>       Priority for created tasks (default: opportunity)
+  --unchecked-only        Only unchecked items (default: true)
+```
+
+### 4.11 Project Commands
+
+#### `mynow project list`
+
+```
+mynow project list [--archived]
+
+Output:
+  PROJECTS
+  ● Q1 Planning           8/12 tasks    2 critical
+  ● Home Renovation       3/15 tasks    0 critical
+  ● Engineering           12/20 tasks   1 critical
+```
+
+#### `mynow project show <name|id>`
+
+```
+mynow project show "Q1 Planning"
+
+Output:
+  Q1 Planning
+  ────────────
+  Description: First quarter objectives
+  Tasks: 8/12 completed (2 critical)
+
+  ● Prepare quarterly report     CRITICAL    Mar 9
+  ● Review budget                CRITICAL    Mar 10
+  ○ Update roadmap               OPPORTUNITY Mar 12
+  ○ Team feedback survey         OPPORTUNITY Mar 15
+  ...
+```
+
+#### `mynow project create <name>`
+
+```
+mynow project create <name> [flags]
+
+Flags:
+  --description <text>    Description
+  --color <hex>           Color (#3B82F6)
+  --parent <name|id>      Parent project for nesting
+```
+
+### 4.12 Planning Commands
+
+#### `mynow plan`
+
+Generate an AI plan for a goal.
+
+```
+mynow plan <goal> [flags]
+
+Flags:
+  --hours <n>             Available hours
+  --deadline <date>       Hard deadline
+  --priority <zone>       Priority level
+
+Examples:
+  mynow plan "Complete Q1 planning" --hours 4 --deadline 2026-03-15
+```
+
+#### `mynow schedule`
+
+Auto-schedule today's tasks.
+
+```
+mynow schedule [flags]
+
+Flags:
+  --date <date>           Date to schedule (default: today)
+  --buffer <min>          Buffer between tasks (default: 15)
+  --respect-calendar      Keep existing calendar items (default: true)
+
+Output:
+  AUTO-SCHEDULED — Monday, March 9
+  09:30 - 11:30  Prepare quarterly report    CRITICAL
+  12:00 - 12:30  Review pull requests        OPPORTUNITY
+  13:00 - 13:45  Update team wiki            OPPORTUNITY
+
+  UNSCHEDULED (not enough time)
+  ◌ Research new frameworks    (moved to tomorrow)
+```
+
+#### `mynow reschedule`
+
+Reschedule tasks to a different date.
+
+```
+mynow reschedule <id...> [flags]
+
+Flags:
+  --date <date>           Target date
+  --spread <days>         Spread across N days
+  --reason <text>         Reason for rescheduling
+
+Examples:
+  mynow reschedule abc123 def456 --date friday --reason "Meeting overran"
+```
+
+### 4.13 Search Command
+
+```
+mynow search <query> [flags]
+
+Flags:
+  --type <types>          Comma-separated: task,habit,chore,event,project,note,memory
+  --priority <zone>       Filter by priority
+  --status <status>       Filter: pending, completed
+  --project <name|id>     Filter by project
+  --from <date>           Results from this date
+  --to <date>             Results to this date
+  --limit <n>             Max results (default: 20)
+
+Examples:
+  mynow search "quarterly report"
+  mynow search "budget" --type task,project --priority critical
+  mynow search "meeting notes" --from 2026-01-01 --limit 50
+
+Output:
+  SEARCH: "quarterly report" (3 results)
+
+  [task]    Prepare quarterly report       CRITICAL    Mar 9     Q1 Planning
+            ...Q1 financials and projections...
+
+  [note]    Q4 Quarterly Report Notes      —           Jan 15    —
+            ...revenue increased 12% over...
+
+  [project] Q1 Planning                    —           —         8/12 tasks
+            ...First quarter objectives...
+```
+
+### 4.14 Profile Commands
+
+#### `mynow whoami`
+
+```
+mynow whoami
+
+Output:
+  John Doe (john@example.com)
+  Timezone: America/New_York
+  Subscription: Pro (expires Jan 15, 2027)
+  Household: Taylor Family (owner)
+  Tasks completed: 1,234
+  Current streak: 45 days 🔥
+```
+
+#### `mynow goals`
+
+```
+mynow goals                                   # Show goals (rendered as markdown)
+mynow goals edit                              # Open goals in $EDITOR
+mynow goals set <markdown>                    # Set goals from string
+```
+
+#### `mynow prefs`
+
+```
+mynow prefs                                   # List all preferences
+mynow prefs get <key>                          # Get specific preference
+mynow prefs set <key> <value>                  # Set a preference
+
+Examples:
+  mynow prefs set ai.tone friendly
+  mynow prefs get ai.tone
+```
+
+### 4.15 Memory Commands
+
+```
+mynow memory list [--limit <n>]                # List recent memories
+mynow memory show <id>                         # Show specific memory
+mynow memory add <content> [flags]             # Store a memory
+  --category <cat>       user_preference, work_context, personal_info, decision, insight, routine
+  --tags <tags>          Comma-separated tags
+  --importance <level>   low, medium, high, critical
+mynow memory search <query> [flags]            # Search memories
+  --category <cat>       Filter by category
+  --tag <tag>            Filter by tag
+mynow memory delete <id>                       # Delete a memory
+```
+
+### 4.16 Household Commands
+
+```
+mynow household                                # Show household info + members
+mynow household members                        # List members
+mynow household invite <email> [--role <role>]  # Invite a member
+```
+
+### 4.17 Review Commands
+
+Daily review workflow.
+
+```
+mynow review daily                             # Start interactive daily review
+mynow review weekly                            # Start interactive weekly review
+```
+
+The daily review walks through:
+1. Yesterday's incomplete tasks — snooze, complete, or delete each
+2. Today's calendar — show upcoming events
+3. Today's habits due — status check
+4. Inbox processing — prioritize unprocessed items
+5. Compass briefing — generate or show latest
+
+### 4.18 Plugin Commands
+
+```
+mynow plugin list                              # List installed plugins
+mynow plugin enable <name>                     # Enable a plugin
+mynow plugin disable <name>                    # Disable a plugin
+mynow plugin info <name>                       # Show plugin details
+```
+
+### 4.19 Utility Commands
+
+```
+mynow version                                  # Print version info
+mynow completion bash|zsh|fish                 # Generate shell completions
+mynow man                                      # Generate man page to stdout
+```
+
+---
+
+## 5. TUI Specification
+
+### 5.1 Screen Architecture
+
+The TUI uses a tab-based layout with a persistent status bar.
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ ● mynow   Now  Inbox  Tasks  Habits  Chores  Cal  ⏱  🛒  ⚙   │  ← Tab bar
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│                     (Active Screen)                             │  ← Main content
+│                                                                 │
+│                                                                 │
+│                                                                 │
+│                                                                 │
+│                                                                 │
+│                                                                 │
+│                                                                 │
+│                                                                 │
+│                                                                 │
+├─────────────────────────────────────────────────────────────────┤
+│ John Doe  ●  3 inbox  2 habits due  ⏱ 14:32     ?=help /=search│  ← Status bar
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 5.2 Tab Bar
+
+Tabs and their keyboard shortcuts:
+
+| Tab | Key | Description |
+|-----|-----|-------------|
+| Now | `1` | Current focus view |
+| Inbox | `2` | Unprocessed items |
+| Tasks | `3` | All tasks by priority zone |
+| Habits | `4` | Habits with streaks |
+| Chores | `5` | Household chores |
+| Cal | `6` | Calendar view |
+| Timers | `7` | Active timers |
+| Grocery | `8` | Grocery list |
+| Settings | `9` | App settings |
+
+Navigate tabs: `1-9` (direct jump), `Tab`/`Shift+Tab` (cycle), `[`/`]` (prev/next).
+
+### 5.3 Screen: Now (default)
+
+The landing screen. Shows what to focus on right now.
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  🎯 NOW — Monday, March 9, 2026                                │
+│                                                                 │
+│  CRITICAL NOW                                                   │
+│  ► ● Prepare quarterly report          2h     Q1 Planning      │  ← focused item
+│    ● Fix production bug                30m    —                 │
+│                                                                 │
+│  ─────────────────────────────────────────────────────────────  │
+│                                                                 │
+│  UPCOMING TODAY                                                 │
+│    09:00  Team Standup                  30m    Conference Rm B  │
+│    14:00  1:1 with Manager              30m    Zoom             │
+│                                                                 │
+│  ─────────────────────────────────────────────────────────────  │
+│                                                                 │
+│  HABITS DUE                                                     │
+│    ◆ Morning meditation                 15m    🔥 45            │
+│    ◆ Read 30 minutes                    30m    🔥 12            │
+│                                                                 │
+│  ─────────────────────────────────────────────────────────────  │
+│                                                                 │
+│  COMPASS                                                        │
+│  "Productive morning ahead. Focus on the quarterly report..."   │
+│  (press g to generate new briefing)                             │
+└─────────────────────────────────────────────────────────────────┘
+
+Keybindings:
+  j/k or ↑/↓    Navigate items
+  Enter          Open task detail
+  d              Mark done
+  s              Snooze
+  g              Generate compass briefing
+  f              Set as focus task
+  n              Quick-add task
+```
+
+### 5.4 Screen: Inbox
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  📥 INBOX (3 items)                                             │
+│                                                                 │
+│  ► Call Sam                                     added 2h ago    │
+│    Look into new health insurance               added yesterday │
+│    Fix leaky faucet                             added Mar 7     │
+│                                                                 │
+│                                                                 │
+│                                                                 │
+│                                                                 │
+│  ─────────────────────────────────────────────────────────────  │
+│  Press p to process inbox, n to add new item                    │
+└─────────────────────────────────────────────────────────────────┘
+
+Keybindings:
+  j/k          Navigate
+  Enter        Open detail
+  n            Quick-add to inbox
+  p            Start processing (interactive prioritization)
+  d            Delete item
+  c            Set as Critical Now
+  o            Set as Opportunity Now
+  h            Set as Over the Horizon
+  x            Set as Parking Lot
+
+Processing mode (p):
+  Shows one item at a time with priority selection:
+  c/o/h/x      Assign priority
+  s            Skip
+  d            Delete
+  q            Exit processing
+```
+
+### 5.5 Screen: Tasks
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  📋 TASKS                                    [filter: all ▼]    │
+│                                                                 │
+│  CRITICAL NOW (2)                                               │
+│  ► ● Prepare quarterly report     2h    Mar 9   Q1 Planning    │
+│    ● Fix production bug           30m   Mar 9   —              │
+│                                                                 │
+│  OPPORTUNITY NOW (3)                                            │
+│    ○ Review pull requests         1h    Mar 9   Engineering    │
+│    ○ Update team wiki             45m   Mar 10  —              │
+│    ○ Schedule dentist             15m   Mar 10  —              │
+│                                                                 │
+│  OVER THE HORIZON (2)                                           │
+│    ◌ Research new frameworks      —     Mar 15  R&D            │
+│    ◌ Plan summer vacation         —     Mar 20  —              │
+│                                                                 │
+│  PARKING LOT (1)                                                │
+│    · Learn Rust                   —     —       —              │
+│                                                                 │
+│  ─────────────────────────────────────────────────────────────  │
+│  n=new  d=done  e=edit  s=snooze  /=search  f=filter            │
+└─────────────────────────────────────────────────────────────────┘
+
+Keybindings:
+  j/k          Navigate
+  Enter        Open task detail
+  n            Create new task
+  d            Mark done
+  e            Edit task (opens edit modal)
+  s            Snooze task
+  a            Archive task
+  m            Move to project
+  /            Search/filter tasks
+  f            Toggle filter panel
+  c/o/h/x      Quick-set priority (critical/opportunity/horizon/parking)
+  Space        Toggle selection (multi-select)
+  D            Bulk done (selected)
+```
+
+Filter panel (f):
+
+```
+  Filter by:
+    Priority:  [x] Critical  [x] Opportunity  [x] Horizon  [ ] Parking
+    Type:      [x] Tasks     [x] Habits       [x] Chores
+    Project:   [All ▼]
+    Status:    [x] Active    [ ] Completed     [ ] Archived
+    Date:      [All ▼]  Today | This week | Overdue | Custom
+```
+
+### 5.6 Screen: Habits
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  🔄 HABITS                                                      │
+│                                                                 │
+│  TODAY (3 due)                                                  │
+│  ► ◆ Morning meditation     15m   🔥 45   ✓ done               │
+│    ◆ Read 30 minutes        30m   🔥 12   ○ pending            │
+│    ◆ Gym workout            1h    🔥 8    ○ pending            │
+│                                                                 │
+│  CHAINS                                                         │
+│    Morning Routine (4 habits, 3/4 done today)                   │
+│    ████████████░░░░  75%                                        │
+│                                                                 │
+│  7-DAY VIEW                                                     │
+│               Mon Tue Wed Thu Fri Sat Sun                       │
+│  Meditation    ✓   ✓   ✓   ✓   ✓   ✓   ✓                      │
+│  Reading       ✓   ✓   ✓   ✓   ○   -   -                      │
+│  Gym           ✓   -   ✓   -   ○   -   -                       │
+│                                                                 │
+│  ─────────────────────────────────────────────────────────────  │
+│  d=done  k=skip  r=reminders  c=chains                          │
+└─────────────────────────────────────────────────────────────────┘
+
+Keybindings:
+  j/k          Navigate
+  d            Mark done
+  K            Skip (preserve streak)
+  Enter        Show streak detail
+  r            Manage reminders
+  c            View chains
+  S            Show full schedule
+```
+
+### 5.7 Screen: Chores
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  🏠 CHORES — Taylor Family                                     │
+│                                                                 │
+│  TODAY                                                          │
+│  ► ▪ Clean kitchen            Riley    20m    ○ pending         │
+│                                                                 │
+│  THIS WEEK                                                      │
+│    ▪ Take out trash (Tue)     Alex     10m    ○ pending         │
+│    ▪ Vacuum living room (Sat) Jordan   30m    ○ pending         │
+│    ▪ Laundry (Sun)            Alex     1h     ○ pending         │
+│                                                                 │
+│  ASSIGNMENTS                                                    │
+│    Alex:   3 chores/week  |  Jordan: 2 chores/week             │
+│    Riley:  2 chores/week                                        │
+│                                                                 │
+│  ─────────────────────────────────────────────────────────────  │
+│  d=done  s=schedule  a=assign                                   │
+└─────────────────────────────────────────────────────────────────┘
+
+Keybindings:
+  j/k          Navigate
+  d            Mark done
+  Enter        Show chore detail
+  s            View full schedule
+  a            Change assignment
+```
+
+### 5.8 Screen: Calendar
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  📅 CALENDAR — March 2026                    [day|week|agenda]  │
+│                                                                 │
+│  ◄ Mon 9   Tue 10   Wed 11   Thu 12   Fri 13   Sat 14   Sun ► │
+│  ─────────────────────────────────────────────────────────────  │
+│  Monday, March 9                                                │
+│                                                                 │
+│  ► 09:00 - 09:30  Team Standup          Conference Room B      │
+│    14:00 - 14:30  1:1 with Manager      Zoom                   │
+│    (all day)      Mom's Birthday                                │
+│                                                                 │
+│  Tuesday, March 10                                              │
+│    10:00 - 11:00  Sprint Planning       Google Meet             │
+│    15:00 - 16:00  Design Review         Figma                   │
+│                                                                 │
+│  Wednesday, March 11                                            │
+│    09:00 - 09:30  Team Standup          Conference Room B      │
+│                                                                 │
+│  ─────────────────────────────────────────────────────────────  │
+│  n=new event  D=decline  S=skip  ←/→=prev/next week            │
+└─────────────────────────────────────────────────────────────────┘
+
+Keybindings:
+  j/k          Navigate events
+  Enter        Event detail
+  n            Create new event
+  D            Decline meeting
+  S            Skip meeting
+  h/l or ←/→   Previous/next week
+  t            Jump to today
+  v            Cycle view mode: day → week → agenda
+```
+
+### 5.9 Screen: Timers
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  ⏱ TIMERS                                                       │
+│                                                                 │
+│  ┌───────────────────────────┐                                  │
+│  │                           │                                  │
+│  │        14 : 32            │   Focus time                     │
+│  │        ━━━━━━━━░░░░       │   COUNTDOWN · RUNNING            │
+│  │                           │   25m total                      │
+│  └───────────────────────────┘                                  │
+│                                                                 │
+│  ┌───────────────────────────┐                                  │
+│  │        18 : 45            │   Deep work block                │
+│  │        ━━━━━━━━━━░░░      │   POMODORO · Session 2/4 · WORK │
+│  │                           │   25m work / 5m break            │
+│  └───────────────────────────┘                                  │
+│                                                                 │
+│  ALARMS                                                         │
+│    07:00  Morning wake-up      daily                            │
+│    08:30  Standup reminder     weekdays                         │
+│                                                                 │
+│  ─────────────────────────────────────────────────────────────  │
+│  n=new timer  p=pomodoro  a=alarm  Space=pause/resume  x=cancel │
+└─────────────────────────────────────────────────────────────────┘
+
+Keybindings:
+  j/k          Navigate timers
+  n            New countdown timer
+  p            New pomodoro session
+  a            New alarm
+  Space        Pause/resume selected timer
+  x            Cancel selected timer
+  z            Snooze ringing timer
+```
+
+### 5.10 Screen: Grocery
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  🛒 GROCERY LIST — Taylor Family                                │
+│                                                                 │
+│  Produce                                                        │
+│  ► □ Avocados (4)                ripe ones for guacamole        │
+│    ☑ Bananas (1 bunch)                                          │
+│                                                                 │
+│  Dairy                                                          │
+│    □ Milk (1 gallon)                                            │
+│    □ Eggs (1 dozen)                                             │
+│                                                                 │
+│  Bakery                                                         │
+│    □ Bread                                                      │
+│                                                                 │
+│  Meat                                                           │
+│    □ Chicken breast (2 lbs)                                     │
+│                                                                 │
+│                                              4 unchecked, 1 ✓  │
+│  ─────────────────────────────────────────────────────────────  │
+│  n=add  Space=check  d=delete  C=clear checked                  │
+└─────────────────────────────────────────────────────────────────┘
+
+Keybindings:
+  j/k          Navigate
+  n            Add new item
+  Space        Toggle check/uncheck
+  d            Delete item
+  C            Clear all checked items
+  /            Search items
+```
+
+### 5.11 Screen: Task Detail (overlay)
+
+Opens as a full-screen overlay when pressing Enter on any task/habit/chore.
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Prepare quarterly report                              [TASK]   │
+│  ═══════════════════════════════════════════════════════════════ │
+│                                                                 │
+│  Priority:     ● CRITICAL NOW                                   │
+│  Start Date:   March 9, 2026                                    │
+│  Duration:     2 hours                                          │
+│  Project:      Q1 Planning                                      │
+│  Status:       Active                                           │
+│  Created:      March 1, 2026                                    │
+│                                                                 │
+│  ─── Description ───────────────────────────────────────────── │
+│                                                                 │
+│  Q1 financials and projections. Need to gather data from        │
+│  the finance team and prepare slides for the board meeting.     │
+│                                                                 │
+│  ─── Actions ───────────────────────────────────────────────── │
+│                                                                 │
+│  d=done  e=edit  s=snooze  a=archive  m=move  p=set priority   │
+│  Esc/q=back                                                     │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+For habits, the detail also shows:
+- Current streak + longest streak
+- Completion history grid
+- Chain membership
+- Reminder settings
+
+### 5.12 Screen: Compass
+
+Accessible via the Now screen or directly via `Shift+G`.
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  🧭 COMPASS BRIEFING — March 9, 2026                           │
+│  Session started 8:30 AM                                        │
+│                                                                 │
+│  ─── Summary ──────────────────────────────────────────────── │
+│                                                                 │
+│  Good morning! You have a productive day ahead with 2 critical  │
+│  tasks and 3 meetings. Your morning is clear until the standup  │
+│  at 9:00 — use this window for the quarterly report.            │
+│                                                                 │
+│  ─── Critical Now ─────────────────────────────────────────── │
+│  ● Prepare quarterly report          2h                         │
+│  ● Fix production bug                30m                        │
+│                                                                 │
+│  ─── Opportunity Now ──────────────────────────────────────── │
+│  ○ Review pull requests              1h                         │
+│                                                                 │
+│  ─── Suggestions ──────────────────────────────────────────── │
+│  • Block 9:30-11:30 for the quarterly report before meetings    │
+│  • Batch the PR reviews after lunch                             │
+│                                                                 │
+│  ─────────────────────────────────────────────────────────────  │
+│  g=regenerate  c=submit correction  C=complete session  q=back  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 5.13 Screen: Search (overlay)
+
+Triggered by `/` from any screen.
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  🔍 Search: quarterly report█                                   │
+│  ─────────────────────────────────────────────────────────────  │
+│  Types: [all ▼]     Priority: [all ▼]     Status: [all ▼]     │
+│  ─────────────────────────────────────────────────────────────  │
+│                                                                 │
+│  ► [task]    Prepare quarterly report     CRITICAL  Mar 9       │
+│              Q1 financials and projections                       │
+│                                                                 │
+│    [note]    Q4 Quarterly Report Notes    —         Jan 15      │
+│              revenue increased 12% over...                       │
+│                                                                 │
+│    [project] Q1 Planning                  —         8/12 tasks  │
+│              First quarter objectives                            │
+│                                                                 │
+│  3 results                                                      │
+│  ─────────────────────────────────────────────────────────────  │
+│  Enter=open  Tab=cycle filters  Esc=close                       │
+└─────────────────────────────────────────────────────────────────┘
+
+Keybindings:
+  Type to search (debounced, fires after 300ms idle)
+  j/k or ↑/↓   Navigate results
+  Enter         Open selected result
+  Tab           Cycle through filter dropdowns
+  Esc           Close search
+```
+
+### 5.14 Screen: Settings
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  ⚙ SETTINGS                                                     │
+│                                                                 │
+│  Account                                                        │
+│    User:       John Doe (john@example.com)                      │
+│    Auth:       API Key (stored in GNOME Keyring)                │
+│    Household:  Taylor Family (owner)                            │
+│                                                                 │
+│  Display                                                        │
+│  ► Theme:       dark ▼                                          │
+│    Date format: relative ▼                                      │
+│    Time format: 12h ▼                                           │
+│    Animations:  on ▼                                            │
+│                                                                 │
+│  API                                                            │
+│    Backend:     https://api.mindyournow.com                     │
+│    Timeout:     30s                                             │
+│                                                                 │
+│  Defaults                                                       │
+│    Priority:    Opportunity Now ▼                                │
+│    Calendar days: 7                                             │
+│                                                                 │
+│  Actions                                                        │
+│    [Logout]  [Clear cache]  [Reset config]                      │
+│                                                                 │
+│  ─────────────────────────────────────────────────────────────  │
+│  Enter=change  q=back                                           │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 5.15 Screen: Help (overlay)
+
+Triggered by `?` from any screen.
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  HELP — mynow TUI                                    [Esc=close]│
+│  ═══════════════════════════════════════════════════════════════ │
+│                                                                 │
+│  NAVIGATION                                                     │
+│    1-9          Jump to tab (Now, Inbox, Tasks, ...)            │
+│    Tab/S-Tab    Cycle tabs                                      │
+│    [ / ]        Previous / next tab                             │
+│    j / k        Move down / up (or ↑/↓)                        │
+│    g / G        First / last item                               │
+│    Enter        Open detail view                                │
+│    Esc / q      Go back / close overlay                         │
+│                                                                 │
+│  ACTIONS                                                        │
+│    n            New item (context-dependent)                    │
+│    d            Mark done                                       │
+│    e            Edit                                            │
+│    s            Snooze                                          │
+│    a            Archive                                         │
+│    Space        Toggle check / select                           │
+│    c/o/h/x      Set priority (critical/opp/horizon/parking)    │
+│                                                                 │
+│  SEARCH & FILTER                                                │
+│    /            Open search overlay                             │
+│    f            Toggle filter panel                             │
+│                                                                 │
+│  TIMERS                                                         │
+│    n            New countdown                                   │
+│    p            New pomodoro                                    │
+│    Space        Pause / resume                                  │
+│                                                                 │
+│  OTHER                                                          │
+│    ?            Toggle this help                                │
+│    :            Command palette                                 │
+│    Ctrl+C       Quit                                            │
+│                                                                 │
+│  Full documentation: mynow --help                               │
+│  Man page: man mynow                                            │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 5.16 Command Palette
+
+Triggered by `:` — like vim command mode.
+
+```
+  : add task "Call Sam" --priority critical
+  : search quarterly report
+  : compass generate
+  : timer 25m
+  : goto inbox
+  : quit
+```
+
+Supports tab completion and fuzzy matching.
+
+---
+
+## 6. Global Keybindings (TUI)
+
+### 6.1 Navigation
+
+| Key | Action |
+|-----|--------|
+| `1`-`9` | Jump to tab by number |
+| `Tab` | Next tab |
+| `Shift+Tab` | Previous tab |
+| `[` / `]` | Previous / next tab |
+| `j` / `↓` | Move cursor down |
+| `k` / `↑` | Move cursor up |
+| `g` | Jump to first item |
+| `G` | Jump to last item |
+| `Enter` | Open detail / confirm |
+| `Esc` | Back / close overlay |
+| `q` | Back (from detail), quit (from root) |
+| `Ctrl+C` | Quit immediately |
+
+### 6.2 Actions (context-dependent)
+
+| Key | Action |
+|-----|--------|
+| `n` | New item (task, event, timer, grocery item — depends on screen) |
+| `d` | Mark done / complete |
+| `e` | Edit selected item |
+| `s` | Snooze task |
+| `a` | Archive task |
+| `Space` | Toggle check / multi-select |
+| `D` | Delete (with confirmation) |
+| `m` | Move to project |
+
+### 6.3 Priority Quick-Set
+
+| Key | Priority |
+|-----|----------|
+| `c` | Critical Now |
+| `o` | Opportunity Now |
+| `h` | Over The Horizon |
+| `x` | Parking Lot |
+
+### 6.4 Global Overlays
+
+| Key | Overlay |
+|-----|---------|
+| `/` | Search |
+| `?` | Help |
+| `:` | Command palette |
+
+### 6.5 Screen-Specific Keys
+
+Listed in each screen's section above. The status bar always shows context-relevant key hints.
+
+---
+
+## 7. Search System
+
+### 7.1 TUI Search (`/`)
+
+- Opens a full-screen overlay with a search input at the top
+- Debounced: fires API call after 300ms of idle typing
+- Results grouped by entity type (task, habit, chore, event, project, note, memory)
+- Filter chips below the search bar: type, priority, status
+- `Enter` opens the selected result in its detail view
+- `Esc` closes search and returns to the previous screen
+- Search history: last 20 searches stored locally, accessible via `↑` in the search input
+
+### 7.2 CLI Search (`mynow search`)
+
+- One-shot search with results printed to stdout
+- Supports `--json` for machine-readable output
+- All filter flags available (see Section 4.13)
+
+### 7.3 Screen-Local Filtering
+
+Each list screen (Tasks, Habits, Chores, Grocery) supports `f` to toggle a filter panel. This is client-side filtering of already-loaded data — not an API call.
+
+---
+
+## 8. Help System
+
+### 8.1 CLI Help
+
+Every command and subcommand has `--help` / `-h` with:
+- Synopsis (usage pattern)
+- Description
+- Available flags with defaults
+- Examples
+
+```
+mynow task add --help
+
+Add a new task to Mind Your Now.
+
+Usage:
+  mynow task add <title> [flags]
+
+Flags:
+  --priority <zone>     Priority zone: critical, opportunity, horizon, parking
+                        (default: from config, usually "opportunity")
+  --date <date>         Start date: today, tomorrow, monday, YYYY-MM-DD
+                        (default: today)
+  --duration <dur>      Duration: 30m, 1h, 2h30m
+  --project <name|id>   Assign to a project
+  --description <text>  Task description
+  --type <type>         Task type: task, habit, chore (default: task)
+  --recurrence <rule>   Recurrence rule for habits/chores
+
+Global Flags:
+  -j, --json        Output in JSON format
+  -q, --quiet       Suppress non-essential output
+      --no-color    Disable color output
+  -h, --help        Show this help
+
+Examples:
+  mynow task add "Call Sam"
+  mynow task add "Prepare report" --priority critical --duration 2h
+  mynow task add "Meditate" --type habit --recurrence daily --duration 15m
+```
+
+### 8.2 TUI Help (`?`)
+
+Full-screen overlay showing all keybindings organized by category. Content is context-aware — shows screen-specific bindings first, then global bindings.
+
+### 8.3 Man Page
+
+Generated from Cobra command tree using `cobra-doc` or custom generator.
+
+```
+MYNOW(1)                    User Commands                    MYNOW(1)
+
+NAME
+       mynow - Mind Your Now CLI & TUI
+
+SYNOPSIS
+       mynow [command] [flags]
+       mynow                    (launches TUI)
+
+DESCRIPTION
+       A fast, scriptable, Linux-native terminal client for Mind Your
+       Now.  Provides both a command-line interface for scripting and
+       automation, and an interactive terminal user interface (TUI)
+       for daily use.
+
+COMMANDS
+       task        Manage tasks (add, list, edit, done, snooze, archive)
+       inbox       Manage inbox items (add, list, process, count)
+       now         Current focus view
+       compass     AI-powered daily briefing
+       habit       Habit tracking and streaks
+       chore       Household chore management
+       calendar    Calendar events
+       timer       Timers, alarms, and pomodoro
+       grocery     Grocery list management
+       project     Project management
+       plan        AI-powered planning
+       schedule    Auto-schedule tasks
+       search      Search across all entities
+       review      Daily/weekly review workflows
+       memory      Memory store and recall
+       household   Household and member management
+       login       Authenticate with MYN
+       logout      Clear credentials
+       whoami      Show current user
+       config      Manage configuration
+       plugin      Manage plugins
+       tui         Launch interactive TUI
+       version     Show version information
+       completion  Generate shell completions
+       man         Generate man page
+
+AUTHENTICATION
+       mynow login              Browser-based OAuth 2.0 PKCE
+       mynow login --api-key    API key authentication
+       mynow login --device     Device authorization (headless)
+
+ENVIRONMENT
+       MYN_API_URL     Backend API URL
+       MYN_API_KEY     API key (overrides stored credential)
+       MYNOW_CONFIG    Config file path
+       NO_COLOR        Disable color output
+
+FILES
+       ~/.config/mynow/config.yaml    Configuration
+       ~/.config/mynow/plugins/       Plugin directory
+
+SEE ALSO
+       https://mindyournow.com
+       https://github.com/mindyournow/myn-cli
+
+AUTHORS
+       Mind Your Now Contributors
+```
+
+### 8.4 Shell Completions
+
+Generated by Cobra for bash, zsh, and fish:
+
+```
+mynow completion bash > /etc/bash_completion.d/mynow
+mynow completion zsh > "${fpath[1]}/_mynow"
+mynow completion fish > ~/.config/fish/completions/mynow.fish
+```
+
+Completions include:
+- All commands and subcommands
+- Flag names and values (where enumerable)
+- Priority zone names
+- Task type names
+- Date shortcuts (today, tomorrow, monday, etc.)
+- Project names (from cache)
+
+---
+
+## 9. Output Formatting
+
+### 9.1 Text Output (default)
+
+- Color-coded priority zones (red=critical, yellow=opportunity, blue=horizon, gray=parking)
+- Unicode symbols for task states: `●` (critical), `○` (opportunity), `◌` (horizon), `·` (parking), `✓` (done), `◆` (habit)
+- Relative dates ("2h ago", "yesterday", "Mar 7")
+- Column-aligned tables for list views
+- Streak fire emoji for habits: `🔥 45`
+
+### 9.2 JSON Output (`--json`)
+
+Every command outputs a JSON object/array when `--json` is passed. Structure matches the API response shape with client-side additions:
+
+```json
+{
+  "tasks": [
+    {
+      "id": "550e8400-...",
+      "title": "Prepare quarterly report",
+      "taskType": "TASK",
+      "priority": "CRITICAL",
+      "startDate": "2026-03-09",
+      "duration": "2h",
+      "projectName": "Q1 Planning",
+      "isCompleted": false
+    }
+  ],
+  "count": 1
+}
+```
+
+### 9.3 Quiet Output (`--quiet`)
+
+Only essential output. For mutations: just the result status. For queries: just the data (no headers, decorations, hints).
+
+### 9.4 No Color (`--no-color` or `NO_COLOR=1`)
+
+Strips ANSI escape codes. Useful for piping, logging, and accessibility.
+
+### 9.5 Markdown Rendering
+
+Glamour renders markdown content in:
+- Task/note descriptions
+- Compass briefing summaries
+- Goals display
+- Help content
+- Memory content
+
+---
+
+## 10. Plugin System
+
+### 10.1 Plugin Interface
+
+Plugins are Go shared objects (`.so`) or standalone binaries in `~/.config/mynow/plugins/`.
+
+#### Shared Object Plugin
+
+```go
+// Plugin must export these symbols
+func Name() string                    // Plugin name
+func Version() string                 // Plugin version
+func Description() string             // One-line description
+func Commands() []*cobra.Command      // CLI commands to register
+func TUIScreens() []tui.Screen       // TUI screens to register (optional)
+func Init(api *api.Client) error      // Initialize with API client
+```
+
+#### Binary Plugin
+
+Standalone binary named `mynow-<name>`. Invoked as `mynow <name> [args]`.
+
+### 10.2 Plugin Directory
+
+```
+~/.config/mynow/plugins/
+  openclaw.so           # Shared object plugin
+  mynow-example         # Binary plugin
+  plugins.yaml          # Plugin state (enabled/disabled)
+```
+
+### 10.3 Plugin Commands
+
+```
+mynow plugin list                  # List all plugins
+mynow plugin enable <name>        # Enable
+mynow plugin disable <name>       # Disable
+mynow plugin info <name>          # Show details
+```
+
+### 10.4 Core Client Independence
+
+The core `mynow` binary compiles and runs without any plugins. Plugins are optional extensions — proprietary ones (like OpenClaw) are distributed separately.
+
+---
+
+## 11. Shell Completions
+
+### 11.1 Supported Shells
+
+- **bash**: via `complete` command
+- **zsh**: via `compdef` / `_mynow` function
+- **fish**: via `complete` command
+
+### 11.2 Installation
+
+```bash
+# bash
+mynow completion bash | sudo tee /etc/bash_completion.d/mynow
+
+# zsh
+mynow completion zsh > "${fpath[1]}/_mynow"
+compinit
+
+# fish
+mynow completion fish > ~/.config/fish/completions/mynow.fish
+```
+
+### 11.3 Dynamic Completions
+
+- Project names fetched from local cache (refreshed on `mynow project list`)
+- Priority zones: `critical`, `opportunity`, `horizon`, `parking`
+- Task types: `task`, `habit`, `chore`
+- Date shortcuts: `today`, `tomorrow`, `monday`, `tuesday`, etc.
+
+---
+
+## 12. Man Page
+
+### 12.1 Generation
+
+Man page generated from Cobra command tree at build time:
+
+```bash
+mynow man > mynow.1
+```
+
+Installed to `/usr/share/man/man1/mynow.1.gz` via package managers.
+
+### 12.2 Sections
+
+- NAME, SYNOPSIS, DESCRIPTION
+- COMMANDS (all subcommands with brief descriptions)
+- AUTHENTICATION (all auth methods)
+- CONFIGURATION (config file format, env vars)
+- ENVIRONMENT (all env vars)
+- FILES (config paths, plugin dirs, credential locations)
+- EXIT CODES
+- EXAMPLES
+- SEE ALSO
+- AUTHORS
+
+---
+
+## 13. Error Handling
+
+### 13.1 Exit Codes
+
+| Code | Meaning |
+|------|---------|
+| 0 | Success |
+| 1 | General error |
+| 2 | Usage error (bad flags, missing args) |
+| 3 | Authentication error (not logged in, expired token) |
+| 4 | Network error (cannot reach backend) |
+| 5 | API error (4xx/5xx from backend) |
+| 6 | Rate limited (429) |
+
+### 13.2 Error Output
+
+Errors go to stderr. JSON mode wraps errors:
+
+```json
+{
+  "error": "Authentication required",
+  "code": 3,
+  "hint": "Run 'mynow login' to authenticate"
+}
+```
+
+### 13.3 Retry Behavior
+
+- Network errors: retry up to 3 times with exponential backoff (1s, 2s, 4s)
+- 429 (rate limited): wait for `Retry-After` header, then retry once
+- 401 (unauthorized): attempt token refresh once, then fail
+- 5xx: retry up to 2 times with 2s delay
+
+### 13.4 Offline Behavior
+
+When the backend is unreachable:
+- CLI: error message with exit code 4
+- TUI: shows cached data (if available) with "offline" indicator in status bar, retries in background
+
+---
+
+## 14. Integration Testing
+
+### 14.1 Test Stack
+
+Docker Compose stack that mirrors production:
+- PostgreSQL 16 (Alpine)
+- Redis 7 (Alpine)
+- MYN Spring Boot backend (built from source)
+
+### 14.2 Test Data Bootstrap
+
+Uses the demo account API to create reproducible test data:
+
+```
+POST /api/v1/admin/demo/recreate-account
+Header: X-Demo-API-Key: <key>
+→ Returns JWT token + account with full sample data
+```
+
+Sample data includes: tasks in all priority zones, habits with streaks, chores with assignments, calendar events, conversation history, compass history.
+
+### 14.3 Test Modes
+
+1. **Full Docker** (default): spins up PostgreSQL + Redis + backend
+2. **External backend**: point `MYN_TEST_BACKEND_URL` at a running instance
+3. **Mock**: HTTP record/replay for unit tests (no Docker needed)
+
+### 14.4 Test Categories
+
+```
+test/integration/
+  auth_test.go              # Login flows, token refresh, logout
+  tasks_test.go             # CRUD, complete, archive, search
+  habits_test.go            # Streaks, skip, chains, schedule
+  chores_test.go            # List, complete, schedule
+  calendar_test.go          # Events CRUD, decline, skip
+  compass_test.go           # Generate, correct, complete
+  timers_test.go            # Countdown, pomodoro, alarm, snooze
+  grocery_test.go           # CRUD, bulk add, check, convert
+  projects_test.go          # CRUD, move tasks
+  planning_test.go          # Plan, auto-schedule, reschedule
+  search_test.go            # Unified search with filters
+  profile_test.go           # Whoami, goals, preferences
+  memory_test.go            # Store, recall, search, delete
+  household_test.go         # Members, invites
+  review_test.go            # Daily review workflow
+  cli_output_test.go        # JSON output, quiet mode, no-color
+  demo_account_test.go      # Bootstrap test data
+  setup.go                  # Docker Compose lifecycle
+  docker-compose.yml        # Test stack definition
+```
+
+### 14.5 CI Integration
+
+- **Unit tests**: every PR (GitHub Actions)
+- **Integration tests**: weekly scheduled + manual trigger
+- Backend source cloned via deploy token (private repo)
+
+---
+
+## 15. Distribution & Packaging
+
+### 15.1 Build
+
+GoReleaser builds static binaries with version info baked in via ldflags:
+
+```
+-X main.version={{.Version}}
+-X main.commit={{.ShortCommit}}
+-X main.date={{.Date}}
+```
+
+CGO disabled for full static linking.
+
+### 15.2 Platforms
+
+| OS | Arch | Binary |
+|----|------|--------|
+| Linux | amd64 | `mynow_linux_amd64` |
+| Linux | arm64 | `mynow_linux_arm64` |
+
+### 15.3 Package Formats
+
+Built by GoReleaser + nfpm:
+
+| Format | Target |
+|--------|--------|
+| `.tar.gz` | Manual install |
+| `.deb` | Debian, Ubuntu, Pop!_OS |
+| `.rpm` | Fedora, RHEL, openSUSE |
+| `.apk` | Alpine |
+| Arch | Arch Linux, Manjaro |
+
+### 15.4 Release Process
+
+1. Tag: `git tag v0.1.0`
+2. Push: `git push origin v0.1.0`
+3. GitHub Actions runs GoReleaser
+4. Binaries + packages uploaded to GitHub Releases
+5. Checksums published
+
+### 15.5 Reproducible Builds
+
+- All dependencies vendored (`go mod vendor`)
+- Build flags ensure deterministic output
+- Checksums published alongside binaries
+- Source fully open — buildable with standard Go toolchain
+
+---
+
+## Appendix A: API Endpoint Mapping
+
+Complete mapping of CLI commands to MYN API endpoints.
+
+| Command | Method | Endpoint |
+|---------|--------|----------|
+| `task list` | GET | `/api/v2/unified-tasks` |
+| `task show <id>` | GET | `/api/v2/unified-tasks/{id}` |
+| `task add` | POST | `/api/v2/unified-tasks` |
+| `task edit <id>` | PATCH | `/api/v2/unified-tasks/{id}` |
+| `task done <id>` | POST | `/api/v2/unified-tasks/{id}/complete` |
+| `task archive <id>` | POST | `/api/v2/unified-tasks/{id}/archive` |
+| `task move <id>` | PUT | `/api/v2/unified-tasks/{id}/project` |
+| `task snooze <id>` | PATCH | `/api/v2/unified-tasks/{id}` (update startDate) |
+| `inbox list` | GET | `/api/v2/unified-tasks` (filter: no priority) |
+| `inbox add` | POST | `/api/v2/unified-tasks` |
+| `inbox count` | GET | `/api/v2/unified-tasks` (count: no priority) |
+| `habit list` | GET | `/api/v2/unified-tasks?type=HABIT` |
+| `habit done <id>` | POST | `/api/v2/unified-tasks/{id}/complete` |
+| `habit skip <id>` | POST | `/api/v1/habit-chains/{id}/skip` |
+| `habit streak <id>` | GET | `/api/v1/habit-chains/{id}/streaks` |
+| `habit chains` | GET | `/api/v1/habit-chains` |
+| `habit schedule` | GET | `/api/v1/habit-chains/schedule` |
+| `habit reminders` | GET | `/api/habits/reminders` |
+| `chore list` | GET | `/api/v2/chores` |
+| `chore done <id>` | POST | `/api/v2/chores/{id}/complete` |
+| `chore schedule` | GET | `/api/v2/chores/schedule` |
+| `calendar` | GET | `/api/v2/calendar/events` |
+| `calendar add` | POST | `/api/v2/calendar/standalone-events` |
+| `calendar delete <id>` | DELETE | `/api/v2/calendar/events/{id}` |
+| `calendar decline <id>` | POST | `/api/v2/calendar/meetings/{id}/decline` |
+| `calendar skip <id>` | POST | `/api/v2/calendar/meetings/{id}/skip` |
+| `compass` | GET | `/api/v2/compass/latest` |
+| `compass generate` | POST | `/api/v2/compass/generate` |
+| `compass correct` | POST | `/api/v2/compass/corrections` |
+| `compass complete` | POST | `/api/v2/compass/complete` |
+| `compass status` | GET | `/api/v2/compass/status` |
+| `timer list` | GET | `/api/v2/timers` |
+| `timer start` | POST | `/api/v2/timers` (type=COUNTDOWN) |
+| `timer pomodoro` | POST | `/api/v2/timers` (type=POMODORO) |
+| `timer alarm` | POST | `/api/v2/timers` (type=ALARM) |
+| `timer cancel <id>` | DELETE | `/api/v2/timers/{id}` |
+| `timer snooze <id>` | POST | `/api/v2/timers/{id}/snooze` |
+| `grocery` | GET | `/api/v1/households/{hid}/grocery-list` |
+| `grocery add` | POST | `/api/v1/households/{hid}/grocery-list/items` |
+| `grocery add-bulk` | POST | `/api/v1/households/{hid}/grocery-list/items/bulk` |
+| `grocery check <id>` | PATCH | `/api/v1/households/{hid}/grocery-list/items/{id}` |
+| `grocery convert` | POST | `/api/v1/households/{hid}/grocery-list/convert-to-tasks` |
+| `project list` | GET | `/api/project` |
+| `project show <id>` | GET | `/api/project/{id}` |
+| `project create` | POST | `/api/project` |
+| `plan` | POST | `/api/schedules/plan` |
+| `schedule` | POST | `/api/schedules/auto` |
+| `reschedule` | POST | `/api/schedules/reschedule` |
+| `search` | POST | `/api/v2/search` |
+| `whoami` | GET | `/api/v1/customers/me` |
+| `goals` | GET | `/api/v1/customers/goals` |
+| `goals set` | PUT | `/api/v1/customers/goals` |
+| `prefs` | GET | `/api/v1/customers/preferences` |
+| `prefs set` | PUT | `/api/v1/customers/preferences` |
+| `memory list` | GET | `/api/v1/customers/memories` |
+| `memory add` | POST | `/api/v1/customers/memories` |
+| `memory search` | GET | `/api/v1/customers/memories/search` |
+| `memory delete <id>` | DELETE | `/api/v1/customers/memories/{id}` |
+| `household` | GET | `/api/v1/customers/me` (extract households) |
+| `household members` | GET | `/api/v1/households/{hid}/members` |
+| `household invite` | POST | `/api/v1/households/{hid}/invites` |
+
+---
+
+## Appendix B: Priority Zones
+
+MYN uses a 4-zone priority system:
+
+| Zone | API Value | CLI Flag | TUI Key | Symbol | Color |
+|------|-----------|----------|---------|--------|-------|
+| Critical Now | `CRITICAL` | `--priority critical` | `c` | `●` | Red |
+| Opportunity Now | `OPPORTUNITY_NOW` | `--priority opportunity` | `o` | `○` | Yellow |
+| Over The Horizon | `OVER_THE_HORIZON` | `--priority horizon` | `h` | `◌` | Blue |
+| Parking Lot | `PARKING_LOT` | `--priority parking` | `x` | `·` | Gray |
+
+---
+
+## Appendix C: Date Parsing
+
+The CLI accepts multiple date formats:
+
+| Input | Resolved To |
+|-------|-------------|
+| `today` | Current date |
+| `tomorrow` | Current date + 1 |
+| `yesterday` | Current date - 1 |
+| `monday`..`sunday` | Next occurrence of that day |
+| `next week` | Monday of next week |
+| `+3d` | 3 days from now |
+| `+1w` | 1 week from now |
+| `2026-03-15` | Exact ISO date |
+| `Mar 15` | March 15 of current year |
+| `3/15` | March 15 of current year |
+
+---
+
+## Appendix D: Duration Parsing
+
+| Input | Seconds |
+|-------|---------|
+| `30s` | 30 |
+| `5m` | 300 |
+| `25m` | 1500 |
+| `1h` | 3600 |
+| `1h30m` | 5400 |
+| `2h` | 7200 |
+
+---
+
+## Appendix E: Recurrence Rule Shortcuts
+
+| Shortcut | RRULE |
+|----------|-------|
+| `daily` | `FREQ=DAILY` |
+| `weekly` | `FREQ=WEEKLY` |
+| `monthly` | `FREQ=MONTHLY` |
+| `weekdays` | `FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR` |
+| `MWF` | `FREQ=WEEKLY;BYDAY=MO,WE,FR` |
+| `TTh` | `FREQ=WEEKLY;BYDAY=TU,TH` |
+
+Full RRULE strings also accepted directly.

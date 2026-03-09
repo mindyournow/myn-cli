@@ -12,7 +12,19 @@
 2. [Authentication](#2-authentication)
 3. [Configuration](#3-configuration)
 4. [CLI Command Reference](#4-cli-command-reference)
+   - 4.1 Global Flags · 4.2 Task · 4.3 Inbox · 4.4 Now · 4.5 Compass
+   - 4.6 Habit · 4.7 Chore · 4.8 Calendar · 4.9 Timer · 4.10 Grocery
+   - 4.11 Project · 4.12 Planning · 4.13 Search · 4.14 Profile · 4.15 Memory
+   - 4.16 Household · 4.17 Review · 4.18 Plugin · 4.19 Utility
+   - 4.20 Task Comments · 4.21 Task Sharing · 4.22 Chore Rotation
+   - 4.23 Notifications · 4.24 Stats & Achievements · 4.25 Export
+   - 4.26 Account · 4.27 API Keys · 4.28 AI Conversations · 4.29 Extended Pomodoro
 5. [TUI Specification](#5-tui-specification)
+   - 5.1 Architecture · 5.2 Tab Bar · 5.3 Now · 5.4 Inbox · 5.5 Tasks
+   - 5.6 Habits · 5.7 Chores · 5.8 Calendar · 5.9 Timers · 5.10 Grocery
+   - 5.11 Task Detail · 5.12 Compass · 5.13 Search · 5.14 Settings · 5.15 Help
+   - 5.16 Command Palette · 5.17 Pomodoro Focus · 5.18 Notifications
+   - 5.19 Stats & Achievements · 5.20 AI Chat
 6. [Global Keybindings (TUI)](#6-global-keybindings-tui)
 7. [Search System](#7-search-system)
 8. [Help System](#8-help-system)
@@ -23,6 +35,10 @@
 13. [Error Handling](#13-error-handling)
 14. [Integration Testing](#14-integration-testing)
 15. [Distribution & Packaging](#15-distribution--packaging)
+
+Appendices: A (API Endpoints) · B (Priority Zones) · C (Date Parsing) ·
+D (Duration Parsing) · E (Recurrence Shortcuts) · F (YNAB Plugin) ·
+G (Notification Types) · H (Internal File Structure)
 
 ---
 
@@ -44,35 +60,54 @@ mynow <command>    → runs CLI command, prints output, exits
 cmd/mynow/          CLI entry point (Cobra root + subcommands)
 internal/
   app/              Application layer — shared by CLI and TUI
-    tasks.go        Task operations (list, create, complete, archive, etc.)
-    habits.go       Habit operations (streaks, skip, chains, schedule)
-    chores.go       Chore operations (list, schedule, complete)
-    inbox.go        Inbox operations (add, list, process)
-    compass.go      Compass/briefing operations
-    calendar.go     Calendar operations
-    timers.go       Timer operations (countdown, alarm, pomodoro)
-    lists.go        Grocery list operations
-    projects.go     Project management
-    planning.go     AI planning / auto-schedule
+    tasks.go        Task CRUD, complete, archive, snooze
+    habits.go       Habit complete, skip, streak, chains, schedule, reminders
+    chores.go       Chore list, complete, schedule, rotation
+    inbox.go        Inbox list, add, process, count
+    compass.go      Compass generate, correct, complete, status
+    calendar.go     Calendar events CRUD, decline, skip
+    timers.go       Countdown + alarm timers
+    pomodoro.go     Pomodoro start/smart-start/pause/resume/stop/complete/history/settings
+    lists.go        Grocery CRUD, bulk add, check, clear, convert
+    projects.go     Project CRUD, move tasks
+    planning.go     AI plan, auto-schedule, reschedule
     search.go       Unified search
-    profile.go      User profile, goals, preferences
-    memory.go       Memory store/recall
-    household.go    Household + members
+    profile.go      Whoami, goals, prefs, coaching intensity
+    memory.go       Memory CRUD, search, export
+    household.go    Household CRUD, members, invites
+    comments.go     Task comment CRUD
+    sharing.go      Task share, respond, revoke, shared-inbox
+    notifications.go Notification list, read, read-all, delete
+    stats.go        Productivity stats, pomodoro stats, AI usage
+    achievements.go Achievements list, streaks
+    export.go       Data export request, list, download, delete
+    account.go      Account info, usage, subscription, billing, deletion
+    apikeys.go      API key CRUD
+    ai.go           AI chat (SSE streaming), conversation CRUD
   api/              HTTP client (one method per API endpoint)
-    client.go       Base HTTP client, auth header injection, retries
-    tasks.go        /api/v2/unified-tasks endpoints
-    habits.go       /api/v1/habit-chains endpoints
-    chores.go       /api/v2/chores endpoints
-    compass.go      /api/v2/compass endpoints
-    calendar.go     /api/v2/calendar endpoints
-    timers.go       /api/v2/timers endpoints
-    lists.go        /api/v1/households/.../grocery-list endpoints
-    projects.go     /api/project endpoints
-    planning.go     /api/schedules endpoints
-    search.go       /api/v2/search endpoints
-    profile.go      /api/v1/customers endpoints
-    memory.go       /api/v1/customers/memories endpoints
-    household.go    /api/v1/households endpoints
+    client.go       Base HTTP, auth injection, retry, SSE reader
+    tasks.go        /api/v2/unified-tasks
+    habits.go       /api/v1/habit-chains
+    chores.go       /api/v2/chores
+    compass.go      /api/v2/compass
+    calendar.go     /api/v2/calendar
+    timers.go       /api/v2/timers
+    pomodoro.go     /api/v1/pomodoro
+    lists.go        /api/v1/households/.../grocery-list
+    projects.go     /api/project
+    planning.go     /api/schedules
+    search.go       /api/v2/search
+    profile.go      /api/v1/customers
+    memory.go       /api/v1/customers/memories
+    household.go    /api/v1/households
+    comments.go     /api/v2/unified-tasks/{id}/comments
+    sharing.go      /api/v2/unified-tasks/{id}/share
+    notifications.go /api/v2/notifications
+    gamification.go /api/v1/gamification
+    export.go       /api/v1/customers/exports
+    account.go      /api/v1/account-deletion, /api/payments, /api/v1/usage
+    apikeys.go      /api/v1/api-keys
+    ai.go           /api/ai/chat/stream (SSE), /api/v1/ai/conversations
   auth/             OAuth PKCE + device flow + credential storage
     oauth.go        Browser-based PKCE flow
     device.go       Device authorization flow
@@ -86,8 +121,9 @@ internal/
     table.go        Column-aligned text tables
     color.go        ANSI color support with --no-color
     markdown.go     Glamour-based markdown rendering
+    progress.go     Progress bars, streaming output for AI chat
   tui/              Bubble Tea TUI
-    app.go          Root Bubble Tea model, screen router
+    app.go          Root Bubble Tea model, screen router, tab management
     screens/        One file per screen
       now.go
       inbox.go
@@ -97,27 +133,38 @@ internal/
       calendar.go
       compass.go
       timers.go
+      pomodoro.go   (Pomodoro focus mode — section 5.17)
       grocery.go
       projects.go
       task_detail.go
       search.go
       settings.go
       help.go
+      notifications.go (Notifications overlay — section 5.18)
+      stats.go        (Stats & Achievements — section 5.19)
+      ai_chat.go      (AI Chat screen — section 5.20)
     components/     Reusable TUI components
       task_list.go    Filterable, sortable task list
       task_row.go     Single task row rendering
       priority_badge.go  Priority zone indicator
       streak_bar.go   Habit streak visualization
-      timer_display.go  Countdown/pomodoro display
+      timer_display.go  Countdown/alarm display
+      pomodoro_ring.go  Pomodoro progress ring with session pip track
       input.go        Text input field
       confirm.go      Confirmation dialog
-      toast.go        Transient notification
-      statusbar.go    Bottom status bar
+      toast.go        Transient notification banner
+      statusbar.go    Bottom status bar (with notification badge 🔔 N)
       tabs.go         Tab bar navigation
       modal.go        Modal overlay
       calendar_grid.go  Week/month calendar grid
+      comment_list.go Markdown comment list with author/timestamp
+      progress_bar.go Horizontal ASCII progress bar
+      chart_bar.go    ASCII bar chart for stats
+      sse_reader.go   SSE stream reader for AI chat streaming
 plugins/            Plugin interface
   plugin.go         Plugin loading, registration, command injection
+  ynab/             YNAB budget plugin (see Appendix F)
+    plugin.go
 test/
   integration/      Docker Compose integration tests
 ```
@@ -125,7 +172,7 @@ test/
 ### 1.3 Data Flow
 
 ```
-User Input → Cobra (CLI) or Bubble Tea (TUI)
+User Input → Bubble Tea (TUI)
           → internal/app (business logic)
           → internal/api (HTTP calls)
           → MYN Backend (HTTPS)
@@ -1213,6 +1260,941 @@ mynow completion bash|zsh|fish                 # Generate shell completions
 mynow man                                      # Generate man page to stdout
 ```
 
+### 4.20 Task Comment Commands
+
+Comments on tasks, habits, and chores support Markdown (max 10,000 characters).
+Rate limited to 10 comments per hour per task.
+
+#### `mynow task comment list <task-id>`
+
+```
+mynow task comment list <task-id>
+
+Output:
+  COMMENTS — Prepare quarterly report (2)
+
+  John Doe  2h ago
+  └─ Added the finance data. Spreadsheet is in the shared drive.
+
+  Alice Smith  yesterday
+  └─ Projections look good. Can you add a risk analysis section?
+```
+
+#### `mynow task comment add <task-id> "<content>"`
+
+```
+mynow task comment add <task-id> "<content>" [flags]
+
+Flags:
+  --stdin             Read content from stdin (for multiline comments)
+
+Examples:
+  mynow task comment add abc123 "Added the finance data."
+  echo -e "## Summary\n- Revenue up 12%\n- Risk: TBD" | mynow task comment add abc123 --stdin
+
+Output:
+  ✓ Comment added.
+```
+
+#### `mynow task comment edit <task-id> <comment-id> "<content>"`
+
+Edit your own comment (authors only; task owners can edit any comment).
+
+```
+mynow task comment edit abc123 cmt456 "Updated: also added risk section."
+✓ Comment updated.
+```
+
+#### `mynow task comment delete <task-id> <comment-id>`
+
+```
+mynow task comment delete abc123 cmt456 [--force]
+✓ Comment deleted.
+```
+
+#### `mynow task comment count <task-id>`
+
+```
+mynow task comment count abc123
+2
+```
+
+---
+
+### 4.21 Task Sharing Commands
+
+Share tasks with household members. Cannot share: chores, habits, recurring tasks, archived tasks.
+Share types: `view` (read-only), `edit` (can modify), `delegate` (transfer ownership).
+
+#### `mynow task share <task-id> <member>`
+
+```
+mynow task share <task-id> <member-name-or-id> [flags]
+
+Flags:
+  --type <type>           view | edit | delegate (default: edit)
+  --message <text>        Optional message to the recipient
+
+Examples:
+  mynow task share abc123 Alex
+  mynow task share abc123 Jordan --type view --message "FYI on this one"
+  mynow task share abc123 "Riley Smith" --type delegate
+
+Output:
+  ✓ Shared "Prepare quarterly report" with Alex (EDIT access).
+    Alex must accept or decline.
+```
+
+#### `mynow task share respond <task-id> accept|decline`
+
+```
+mynow task share respond abc123 accept
+mynow task share respond abc123 decline [--note "Too busy right now"]
+
+Output (accept):
+  ✓ Accepted: "Prepare quarterly report" (shared by John Doe, EDIT access).
+```
+
+#### `mynow task share revoke <task-id> <member>`
+
+```
+mynow task share revoke abc123 Alex
+✓ Revoked Alex's access to "Prepare quarterly report".
+```
+
+#### `mynow task share list <task-id>`
+
+List all shares for a task (only task owner).
+
+```
+mynow task share list abc123
+
+Output:
+  SHARES — Prepare quarterly report
+  Member    Type    Status     Shared
+  Alex      EDIT    ACCEPTED   2h ago
+  Jordan    VIEW    PENDING    5m ago
+```
+
+#### `mynow shared-inbox`
+
+Show all tasks shared with you (pending + accepted).
+
+```
+mynow shared-inbox [flags]
+
+Flags:
+  --pending       Only show pending shares awaiting response
+  --accepted      Only show accepted (active shared tasks)
+
+Output:
+  SHARED WITH ME
+
+  PENDING (1)
+  ? Review budget proposal        from Alice Smith   VIEW    5m ago
+    → mynow task share respond <id> accept|decline
+
+  ACCEPTED (2)
+  ✓ Fix login page bug            from John Doe      EDIT    accepted yesterday
+  ✓ Write unit tests for auth     from Sam Lee       EDIT    accepted Mar 7
+```
+
+---
+
+### 4.22 Chore Rotation Commands
+
+Manage rotation assignments for household chores.
+
+#### `mynow chore rotation <chore-id>`
+
+Show current rotation status.
+
+```
+mynow chore rotation <chore-id>
+
+Output:
+  ROTATION — Take out trash
+
+  Current assignee:  Alex    (position 1 of 3)
+  Next assignee:     Jordan
+  Rotation order:    Alex → Jordan → Riley → (repeat)
+  Last rotated:      March 7, 2026
+  Total rotations:   15
+  Status:            ACTIVE
+```
+
+#### `mynow chore rotation advance <chore-id>`
+
+Advance to the next member in rotation (without marking the chore done).
+
+```
+mynow chore rotation advance abc123
+
+Output:
+  ✓ Rotation advanced.
+    Take out trash — now assigned to Jordan (next: Riley)
+```
+
+#### `mynow chore rotation reset <chore-id>`
+
+Reset rotation to the first member.
+
+```
+mynow chore rotation reset abc123 [--force]
+
+Output:
+  ✓ Rotation reset.
+    Take out trash — now assigned to Alex (first in rotation)
+```
+
+#### `mynow chore rotation order <chore-id> <member1> <member2> ...`
+
+Update the rotation order.
+
+```
+mynow chore rotation order abc123 Riley Jordan Alex [flags]
+
+Flags:
+  --preserve-position     Keep the current assignee at their relative position
+
+Output:
+  ✓ Rotation order updated: Riley → Jordan → Alex → (repeat)
+    Currently assigned: Riley
+```
+
+---
+
+### 4.23 Notification Commands
+
+Manage in-app notifications (comments, shares, household events, AI messages, timer completions).
+Two versions of the API exist (v1 and v2); the CLI uses v2 for full history with read/actioned state.
+
+#### `mynow notifications`
+
+List recent notifications.
+
+```
+mynow notifications [flags]
+
+Flags:
+  --unread        Show only unread notifications
+  --limit <n>     Number to show (default: 20, max: 100)
+  --page <n>      Page number (0-indexed, default: 0)
+
+Output:
+  NOTIFICATIONS  (2 unread)
+
+  ● John Doe commented on "Prepare quarterly report"    2h ago    [unread]
+  ● Task "Review budget" was shared with you            5h ago    [unread]
+  ○ "Morning Routine" chain completed 7 days straight   yesterday
+  ○ Jordan accepted your share of "Fix login page"      Mar 7
+  ○ Riley joined Taylor Family household                Mar 5
+
+  Showing 5 of 12. Use --page to see more.
+```
+
+#### `mynow notifications unread`
+
+Show unread count and the 5 most recent unread notifications.
+
+```
+mynow notifications unread
+
+Output:
+  Unread: 2
+
+  ● John Doe commented on "Prepare quarterly report"    2h ago
+  ● Task "Review budget" was shared with you            5h ago
+```
+
+#### `mynow notifications read <id>`
+
+Mark a notification as read.
+
+```
+mynow notifications read <id>
+✓ Marked as read.
+```
+
+#### `mynow notifications read-all`
+
+Mark all notifications as read.
+
+```
+mynow notifications read-all
+✓ Marked 12 notifications as read.
+```
+
+#### `mynow notifications delete <id>`
+
+Delete a notification.
+
+```
+mynow notifications delete <id> [--force]
+✓ Notification deleted.
+```
+
+---
+
+### 4.24 Stats & Achievements Commands
+
+#### `mynow stats`
+
+Overall productivity statistics.
+
+```
+mynow stats [flags]
+
+Flags:
+  --from <date>       Start of period (default: 30 days ago)
+  --to <date>         End of period (default: today)
+
+Output:
+  PRODUCTIVITY STATS — Last 30 Days
+
+  Tasks completed:      47   (avg 1.6/day)
+  Habits completed:     82   (89% completion rate)
+  Focus time:         38.5h  (avg 1.3h/day)
+  Pomodoro sessions:    62   (52 completed, 84% completion rate)
+  Best day:           Mar 2  (8 tasks + 3.5h focus)
+  Current streak:      12 days 🔥
+```
+
+#### `mynow stats pomodoro`
+
+Pomodoro-specific statistics.
+
+```
+mynow stats pomodoro [flags]
+
+Flags:
+  --from <date>       Start of period
+  --to <date>         End of period
+  --task <id>         Stats for a specific linked task
+  --group-by <unit>   day | week | month (default: week)
+
+Output:
+  POMODORO STATS — Last 30 Days
+
+  Total sessions:       62   (52 completed, 10 cancelled)
+  Completion rate:      84%
+  Total focus time:   21.7h
+  Total break time:    5.4h
+  Total interruptions:  8
+  Most productive hour: 10 AM
+  Average session:     22.3 min
+
+  WEEKLY BREAKDOWN
+  Week of Mar 2:    12 sessions   5.0h focus   2 interruptions
+  Week of Feb 24:   15 sessions   6.3h focus   3 interruptions
+  Week of Feb 17:    9 sessions   3.8h focus   1 interruption
+```
+
+#### `mynow stats usage`
+
+AI token usage and daily request limits.
+
+```
+mynow stats usage [flags]
+
+Flags:
+  --from <date>       Start of period (default: last 30 days)
+  --to <date>         End of period
+
+Output:
+  AI USAGE — Last 30 Days
+
+  Total cost:          $1.23
+  Total tokens:      185,430  (125,200 input / 60,230 output)
+  Total operations:      312  (308 successful, 4 failed)
+  Success rate:         98.7%
+  Avg cost/operation:   $0.004
+
+  Today:  85 / 100 requests  (85% of daily limit remaining)
+```
+
+#### `mynow achievements`
+
+List achievements (unlocked + available with progress).
+
+```
+mynow achievements [flags]
+
+Flags:
+  --unlocked          Only show unlocked achievements
+  --available         Only show locked achievements (with progress)
+
+Output:
+  ACHIEVEMENTS — 12 unlocked, 1,450 points
+
+  UNLOCKED
+  🏆 First Task           Complete your first task              Mar 1     50 pts
+  🔥 Week Warrior         7-day streak on any habit             Mar 8    100 pts
+  ⚡ Power Hour           5 Pomodoros in one day                Mar 5    150 pts
+  🎯 Inbox Zero           Process inbox to 0                    Mar 3     75 pts
+
+  AVAILABLE
+  🌟 Century Club         100-day habit streak       45/100             500 pts
+  🚀 Productivity Pro     Complete 1,000 tasks       472/1000           250 pts
+  🏠 Team Player          Share 10 tasks             3/10               100 pts
+```
+
+#### `mynow achievements streaks`
+
+Show all active streaks.
+
+```
+mynow achievements streaks
+
+Output:
+  STREAKS
+
+  Morning meditation    45 days   🔥  (longest: 120)
+  Daily task review     12 days   🔥  (longest: 23)
+  Pomodoro sessions      8 days   🔥  (longest: 15)
+```
+
+---
+
+### 4.25 Export Commands
+
+Export your MYN data in JSON, CSV, or iCal format. Exports are async jobs; download when complete.
+Export files are retained for 30 days.
+
+#### `mynow export`
+
+Request a data export.
+
+```
+mynow export [flags]
+
+Flags:
+  --format <fmt>        json | csv | ical (default: json)
+  --include <cats>      Comma-separated: tasks,habits,chores,events,memories
+                        (default: all categories)
+
+Examples:
+  mynow export                              # Interactive: choose format
+  mynow export --format json               # JSON, all data
+  mynow export --format ical --include events
+
+Output:
+  Requesting export (json, all categories)...
+  ✓ Export requested. Job ID: exp-abc123
+    Check status: mynow export list
+    Download when ready: mynow export download exp-abc123
+    Files retained for 30 days.
+```
+
+#### `mynow export list`
+
+List all export jobs.
+
+```
+mynow export list
+
+Output:
+  EXPORTS
+  ID           Format  Requested   Status       Note
+  exp-abc123   json    Mar 9       COMPLETED    ready to download
+  exp-def456   csv     Mar 1       COMPLETED    expires Mar 31
+  exp-ghi789   ical    Feb 15      DELETED      —
+```
+
+#### `mynow export download <id>`
+
+Download a completed export.
+
+```
+mynow export download <id> [flags]
+
+Flags:
+  --output <path>       Destination path (default: ./mynow-export-<date>.<ext>)
+
+Examples:
+  mynow export download exp-abc123
+  mynow export download exp-abc123 --output ~/backups/myn.zip
+
+Output:
+  Downloading export exp-abc123...
+  ✓ Saved to mynow-export-2026-03-09.zip  (2.3 MB)
+```
+
+#### `mynow export delete <id>`
+
+Delete an export job.
+
+```
+mynow export delete <id> [--force]
+✓ Export exp-abc123 deleted.
+```
+
+---
+
+### 4.26 Account Commands
+
+Manage your account, subscription, and billing.
+
+#### `mynow account`
+
+Show account summary.
+
+```
+mynow account
+
+Output:
+  ACCOUNT
+
+  Name:          John Doe
+  Email:         john@example.com
+  Member since:  January 15, 2025
+  Subscription:  Pro (renews January 15, 2027)
+  Household:     Taylor Family (owner, 3 members)
+  Auth method:   API Key (GNOME Keyring)
+```
+
+#### `mynow account usage`
+
+Show usage vs subscription tier limits.
+
+```
+mynow account usage
+
+Output:
+  USAGE & LIMITS — Pro Tier
+
+  AI requests today:     85 / 100    ████████░░  85%
+  Storage:               45 MB / 1 GB  ░░░░░░░░░   5%
+  API keys:               2 / 5       ████░░░░░░  40%
+```
+
+#### `mynow account subscription`
+
+Show subscription tier and billing status.
+
+```
+mynow account subscription
+
+Output:
+  SUBSCRIPTION
+
+  Tier:         Pro
+  Status:       Active
+  Billing:      Annual ($79.99/year)
+  Next billing: January 15, 2027
+  Auto-renew:   Yes
+```
+
+#### `mynow account billing`
+
+Open the Stripe billing portal in a browser (manage payment method, download invoices, etc.).
+
+```
+mynow account billing
+Opening billing portal in browser...
+```
+
+#### `mynow account delete`
+
+Request account deletion. Sends a confirmation email; account is permanently deleted after
+a 14-day grace period.
+
+```
+mynow account delete [--immediate]
+
+Output:
+  WARNING: All your data will be permanently deleted in 14 days.
+  This cannot be undone.
+
+  Type your email to confirm: john@example.com
+  ✓ Deletion requested. Confirmation email sent to john@example.com.
+    Cancel at any time: mynow account delete cancel
+    Check status: mynow account delete status
+```
+
+#### `mynow account delete cancel`
+
+Cancel a pending account deletion.
+
+```
+mynow account delete cancel
+✓ Deletion cancelled. Your account remains active.
+```
+
+#### `mynow account delete status`
+
+Check the deletion status.
+
+```
+mynow account delete status
+
+Output:
+  Deletion requested:   March 9, 2026
+  Scheduled for:        March 23, 2026  (14 days remaining)
+  Status:               Awaiting email confirmation
+```
+
+---
+
+### 4.27 API Key Commands
+
+Create and manage API keys for programmatic / scripted access to MYN.
+
+Keys are prefixed `myn_`. The full key is shown **only at creation** — it cannot be retrieved again. Scopes restrict what the key can access. Rate limits are per-key.
+
+#### `mynow apikey list`
+
+```
+mynow apikey list
+
+Output:
+  API KEYS (2)
+  ID  Name              Scopes                    Created   Last used   Active
+  1   Shell scripts     tasks:list,tasks:view     Mar 1     Mar 9       ✓
+  2   Automation        tasks:*,habits:list        Feb 15    Mar 8       ✓
+```
+
+#### `mynow apikey create <name>`
+
+```
+mynow apikey create <name> [flags]
+
+Flags:
+  --scopes <list>        Comma-separated scopes (default: tasks:list,tasks:view)
+  --expires <date>       Expiration date: YYYY-MM-DD (default: never)
+  --description <text>   Description
+  --rate-per-min <n>     Per-minute rate limit (default: 60)
+  --rate-per-hour <n>    Per-hour rate limit (default: 1000)
+
+Available scopes:
+  tasks:list    tasks:view    tasks:create    tasks:update    tasks:delete    tasks:*
+  habits:list   habits:view   habits:*
+  calendar:list calendar:*
+  timers:list   timers:*
+  grocery:list  grocery:*
+  read:all      write:all
+
+Examples:
+  mynow apikey create "Shell scripts" --scopes "tasks:list,tasks:view"
+  mynow apikey create "Full access" --scopes read:all
+  mynow apikey create "Temp" --expires 2026-04-01
+
+Output:
+  ✓ API key created.
+
+  Name:    Shell scripts
+  ID:      1
+  Scopes:  tasks:list, tasks:view
+  Expires: never
+
+  Key (shown once — copy it now):
+  myn_abc123def456ghi789jkl012mno345pqr678stu901
+
+  Use with:  export MYN_API_KEY=myn_abc123...
+             mynow login --api-key  (to store in keyring)
+```
+
+#### `mynow apikey show <id>`
+
+Show key metadata (not the secret value).
+
+```
+mynow apikey show <id>
+
+Output:
+  API KEY #1
+
+  Name:              Shell scripts
+  Scopes:            tasks:list, tasks:view
+  Status:            Active
+  Created:           March 1, 2026
+  Last used:         March 9, 2026
+  Expires:           Never
+  Rate limits:       60/min, 1000/hour
+  Requests (24h):    45
+  Unique IPs (24h):  1
+```
+
+#### `mynow apikey update <id>`
+
+```
+mynow apikey update <id> [flags]
+
+Flags:
+  --name <text>          New display name
+  --description <text>   New description
+  --scopes <list>        Replace all scopes
+  --expires <date>       Set expiration (use "never" to remove expiry)
+  --enable               Re-enable a disabled key
+  --disable              Disable without deleting
+  --rate-per-min <n>
+  --rate-per-hour <n>
+```
+
+#### `mynow apikey revoke <id>`
+
+Permanently revoke a key. All requests using it immediately receive 401.
+
+```
+mynow apikey revoke <id> [--force]
+✓ API key "Shell scripts" revoked.
+```
+
+---
+
+### 4.28 AI Conversation Commands
+
+Chat with Kaia, the MYN AI assistant. Text-only in the CLI (no voice). Responses stream to
+stdout by default. Conversations are saved with a 20-message cap per thread; use
+`continue` to extend beyond the cap (prior context is summarized).
+
+#### `mynow ai chat`
+
+Start or continue an interactive chat session.
+
+```
+mynow ai chat [flags]
+
+Flags:
+  --conversation <id>    Continue an existing conversation
+  --task <id>            Link session to a specific task (task context injected)
+  --no-stream            Wait for complete response before printing
+
+Examples:
+  mynow ai chat                              # New conversation
+  mynow ai chat --conversation abc123        # Continue existing
+  mynow ai chat --task def456                # Task-focused chat
+
+Session:
+  > How should I prioritize today?
+  < Kaia: Based on your current tasks and calendar...
+
+  Type your message and press Enter. Type 'quit' or press Ctrl+D to end.
+  Conversation saved automatically.
+```
+
+#### `mynow ai conversations`
+
+List saved conversations.
+
+```
+mynow ai conversations [flags]
+
+Flags:
+  --archived      Include archived conversations
+  --voice         Include voice-only conversations
+  --limit <n>     Number to return (default: 20)
+
+Output:
+  CONVERSATIONS (8)
+
+  abc123   Task prioritization         3 messages   Mar 9
+  def456   Weekly planning session    12 messages   Mar 7
+  ghi789   Habit advice                5 messages   Mar 5  [archived]
+```
+
+#### `mynow ai conversations show <id>`
+
+Show all messages in a conversation.
+
+```
+mynow ai conversations show <id> [flags]
+
+Flags:
+  --last <n>    Show only the last N messages (default: all)
+
+Output:
+  CONVERSATION — Task prioritization (Mar 9, 2026, 3 messages)
+
+  You:  How should I prioritize today?
+
+  Kaia: Good morning! Looking at your current tasks, I'd suggest starting
+        with "Prepare quarterly report" — it's due today and is marked
+        Critical. Your calendar is clear until 9:00 AM, giving you a 90-
+        minute focus block before your standup...
+
+  You:  What about the production bug?
+```
+
+#### `mynow ai conversations archive <id>`
+
+Archive a conversation.
+
+```
+mynow ai conversations archive <id>
+✓ Conversation archived.
+```
+
+#### `mynow ai conversations delete <id>`
+
+Permanently delete a conversation and all its messages.
+
+```
+mynow ai conversations delete <id> [--force]
+✓ Conversation deleted.
+```
+
+#### `mynow ai conversations continue <id>`
+
+Extend a conversation past the 20-message cap. Prior context is automatically summarized.
+
+```
+mynow ai conversations continue <id>
+
+Output:
+  Continuing "Task prioritization" — context from prior thread summarized.
+  > ...
+```
+
+---
+
+### 4.29 Extended Pomodoro Commands
+
+The `timer pomodoro` command (section 4.9) provides a basic start. These subcommands expose
+the full `/api/v1/pomodoro` API: smart task selection, pause/resume, session history, and settings.
+
+Note: `timer pomodoro` → `POST /api/v1/pomodoro/start`; this is distinct from the general
+timer system at `/api/v2/timers`.
+
+#### `mynow timer pomodoro smart`
+
+Context-aware Pomodoro start: detects available time window from calendar and suggests the
+best task to work on.
+
+```
+mynow timer pomodoro smart [flags]
+
+Flags:
+  --available <min>     Minutes available (default: auto-detect from calendar)
+  --suggestions <n>     Number of task suggestions to offer (default: 3)
+  --task <id>           Skip suggestions, link to specific task directly
+
+Output:
+  SMART POMODORO
+
+  Available time: 85 minutes (next meeting: Team Standup at 10:00 AM)
+
+  Suggested tasks:
+  1. Prepare quarterly report    2h total    HIGH  "Most critical, fits window"
+  2. Fix production bug          30m total   MED   "Overdue by 1 day"
+  3. Review pull requests        1h total    MED   "2 PRs pending"
+
+  Select [1-3] or Enter to start without linking: 1
+
+  ⏱  Starting 25-minute Pomodoro — Prepare quarterly report
+     25:00 ━━━━━━━━━━░░░░░░░░░░  (p=pause, s=stop, q=quit display)
+```
+
+#### `mynow timer pomodoro current`
+
+Show the currently active Pomodoro session.
+
+```
+mynow timer pomodoro current
+
+Output:
+  ACTIVE POMODORO
+
+  Task:        Prepare quarterly report
+  Type:        WORK — session 2 of 4
+  Remaining:   18:45
+  Started:     9:30 AM
+  Interruptions: 0
+```
+
+#### `mynow timer pomodoro pause`
+
+Pause the running Pomodoro.
+
+```
+mynow timer pomodoro pause
+✓ Paused at 18:45 remaining.
+```
+
+#### `mynow timer pomodoro resume`
+
+Resume a paused Pomodoro.
+
+```
+mynow timer pomodoro resume
+✓ Pomodoro resumed.
+```
+
+#### `mynow timer pomodoro stop`
+
+Cancel the current Pomodoro session.
+
+```
+mynow timer pomodoro stop [--force]
+✓ Pomodoro stopped and cancelled.
+```
+
+#### `mynow timer pomodoro complete`
+
+Mark the current Pomodoro as complete before the timer finishes.
+
+```
+mynow timer pomodoro complete [--note <text>]
+✓ Pomodoro marked complete.
+  Next: 5-minute short break (session 2 of 4).
+```
+
+#### `mynow timer pomodoro history`
+
+View past Pomodoro sessions.
+
+```
+mynow timer pomodoro history [flags]
+
+Flags:
+  --from <date>       Start date (default: 7 days ago)
+  --to <date>         End date (default: today)
+  --status <s>        completed | cancelled (default: all)
+  --task <id>         Filter by linked task
+
+Output:
+  POMODORO HISTORY
+
+  Mar 9   work    25m  Prepare quarterly report  ✓ completed
+  Mar 9   work    25m  Prepare quarterly report  ✓ completed
+  Mar 9   break    5m  —                          ✓ completed
+  Mar 8   work    25m  Fix production bug         ✗ cancelled (interruption)
+  Mar 8   work    25m  Fix production bug         ✓ completed
+```
+
+#### `mynow timer pomodoro settings`
+
+View or update Pomodoro settings. With no flags, prints current settings.
+
+```
+mynow timer pomodoro settings [flags]
+
+Flags:
+  --work <min>              Work phase duration 1-60 (default: 25)
+  --short-break <min>       Short break 1-30 (default: 5)
+  --long-break <min>        Long break 1-60 (default: 15)
+  --sessions <n>            Sessions before long break 1-10 (default: 4)
+  --auto-start-breaks       Auto-start break after work phase
+  --no-auto-start-breaks
+  --auto-start-work         Auto-start work after break
+  --no-auto-start-work
+  --sound <name>            Completion sound: default|bell|chime|gong|ding|alarm|urgent|none
+  --notifications           Enable completion notifications
+  --no-notifications
+
+Output (no flags):
+  POMODORO SETTINGS
+
+  Work duration:            25 min
+  Short break:               5 min
+  Long break:               15 min
+  Sessions until long break: 4
+  Auto-start breaks:         off
+  Auto-start work:           off
+  Completion sound:          default
+  Notifications:             on
+```
+
 ---
 
 ## 5. TUI Specification
@@ -1237,7 +2219,7 @@ The TUI uses a tab-based layout with a persistent status bar.
 │                                                                 │
 │                                                                 │
 ├─────────────────────────────────────────────────────────────────┤
-│ John Doe  ●  3 inbox  2 habits due  ⏱ 14:32     ?=help /=search│  ← Status bar
+│ John Doe  ●  3 inbox  2 habits due  ⏱ 14:32  🔔 2  ?=help /=search│  ← Status bar
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -1595,6 +2577,31 @@ For habits, the detail also shows:
 - Chain membership
 - Reminder settings
 
+For tasks with comments or shares, the detail adds:
+
+```
+  ─── Comments (2) ─────────────────────────────────────────── │
+                                                                 │
+  John Doe  2h ago                                              │
+  └─ Added the finance data. Spreadsheet in shared drive.       │
+                                                                 │
+  Alice Smith  yesterday                                         │
+  └─ Projections look good. Add a risk section?                 │
+                                                                 │
+  ─── Shared with ─────────────────────────────────────────── │
+  Alex     EDIT     ACCEPTED   shared 2h ago                    │
+  Jordan   VIEW     PENDING    shared 5m ago                    │
+                                                                 │
+  C=add comment  T=start Pomodoro for this task                  │
+```
+
+Additional keybindings in task detail:
+```
+  C          Open/add comment (opens text input; Markdown supported)
+  Shift+S    Share task with a household member
+  T          Start Pomodoro linked to this task
+```
+
 ### 5.12 Screen: Compass
 
 Accessible via the Now screen or directly via `Shift+G`.
@@ -1740,18 +2747,244 @@ Triggered by `?` from any screen.
 
 ### 5.16 Command Palette
 
-Triggered by `:` — like vim command mode.
+Triggered by `:` — like vim command mode. Supports Tab completion and fuzzy matching.
+History: last 50 commands stored, recalled with `↑`/`↓`.
 
 ```
-  : add task "Call Sam" --priority critical
-  : search quarterly report
-  : compass generate
-  : timer 25m
-  : goto inbox
-  : quit
+┌─────────────────────────────────────────────────────────────────┐
+│  : █                                                            │
+│  ─────────────────────────────────────────────────────────────  │
+│  add task ...          Add a new task                           │
+│  add habit ...         Add a new habit                          │
+│  add chore ...         Add a new chore                          │
+│  inbox add ...         Add to inbox                             │
+│  search ...            Search all items                         │
+│  goto now              Switch to Now screen                      │
+│  goto inbox            Switch to Inbox screen                    │
+│  goto tasks            Switch to Tasks screen                    │
+│  goto habits           Switch to Habits screen                   │
+│  goto chores           Switch to Chores screen                   │
+│  goto calendar         Switch to Calendar screen                 │
+│  goto timers           Switch to Timers screen                   │
+│  goto grocery          Switch to Grocery screen                  │
+│  goto settings         Switch to Settings screen                 │
+│  goto stats            Open Stats & Achievements screen          │
+│  goto ai               Open AI Chat screen                       │
+│  goto pomodoro         Open Pomodoro focus screen                │
+│  compass generate      Generate new compass briefing             │
+│  compass correct       Submit compass correction                 │
+│  timer 25m             Start 25-min countdown                    │
+│  pomodoro              Start Pomodoro (standard 25/5)            │
+│  pomodoro smart        Smart Pomodoro (AI task suggestion)       │
+│  pomodoro stop         Stop current Pomodoro                     │
+│  alarm 07:00           Set alarm for 07:00                       │
+│  notifications         Open notifications overlay                │
+│  achievements          Open achievements screen                  │
+│  ai chat               Open AI chat screen                       │
+│  export                Request data export                       │
+│  logout                Log out of MYN                            │
+│  quit / q              Quit the TUI                              │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-Supports tab completion and fuzzy matching.
+Fuzzy matching: `: pom` matches `pomodoro`, `: gs` matches `goto settings`, etc.
+Argument completion: after `add task `, completes `--priority`, `--date`, etc.
+
+### 5.17 Screen: Pomodoro Focus Mode
+
+Accessed from the Timers screen (`P`), from the command palette (`: pomodoro`), or via
+`mynow tui --screen pomodoro`. Full-screen immersive focus mode with session management.
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  🍅 POMODORO — Prepare quarterly report          [Session 2/4]  │
+│                                                                 │
+│                                                                 │
+│                     ┌───────────────────┐                       │
+│                     │                   │                       │
+│                     │     18 : 45       │                       │
+│                     │                   │                       │
+│                     │  ████████████░░░  │                       │
+│                     │    WORK PHASE     │                       │
+│                     └───────────────────┘                       │
+│                                                                 │
+│                      Space=pause  s=stop                        │
+│                                                                 │
+│  ─────────────────────────────────────────────────────────────  │
+│                                                                 │
+│  SESSION PROGRESS                                               │
+│  [WORK][BREAK][WORK ►][BREAK][LONG BREAK]                      │
+│   ✓     ✓      now    pending  pending                          │
+│                                                                 │
+│  ─────────────────────────────────────────────────────────────  │
+│                                                                 │
+│  Today's sessions:  6 completed  ·  150 min focus  ·  0 interrupt│
+│                                                                 │
+│  SUGGESTIONS (next task)                                        │
+│    1. Fix production bug      30m  CRITICAL  "overdue 1 day"   │
+│    2. Review pull requests     1h  OPPORTUNITY                  │
+│                                                                 │
+│  ─────────────────────────────────────────────────────────────  │
+│  Space=pause/resume  s=stop  c=complete early  i=interrupt      │
+│  h=session history  !=settings  q=back                          │
+└─────────────────────────────────────────────────────────────────┘
+
+Keybindings:
+  Space        Pause / resume
+  s            Stop (cancel current session)
+  c            Complete session early
+  i            Record an interruption
+  n            Add note to current session
+  h            View session history
+  !            Open Pomodoro settings
+  q / Esc      Return to Timers screen (session keeps running)
+```
+
+**Break screen** (automatically shown between work sessions):
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  ☕ BREAK — Short break (session 2 of 4)                        │
+│                                                                 │
+│                     ┌───────────────────┐                       │
+│                     │     04 : 23       │                       │
+│                     │  ████████░░░░░░░  │                       │
+│                     │   SHORT BREAK     │                       │
+│                     └───────────────────┘                       │
+│                                                                 │
+│  Next up: Work session 3 — Prepare quarterly report             │
+│                                                                 │
+│  Space=skip break  q=stop session                               │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 5.18 Overlay: Notifications
+
+Triggered from any screen via `N` (Shift+N). Shows the most recent 10 notifications.
+Unread count shown in the status bar: `🔔 2` when there are unread notifications.
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  🔔 NOTIFICATIONS (2 unread)                         [N=close]  │
+│  ─────────────────────────────────────────────────────────────  │
+│                                                                 │
+│  ► ● John Doe commented on "Prepare quarterly report"  2h ago  │
+│    ● "Review budget" was shared with you               5h ago  │
+│    ○ Morning Routine chain: 7 days completed          yesterday │
+│    ○ Jordan accepted "Fix login page" share            Mar 7   │
+│    ○ Riley joined Taylor Family                        Mar 5   │
+│                                                                 │
+│  2 unread · 5 shown of 12                                       │
+│  ─────────────────────────────────────────────────────────────  │
+│  Enter=open related  r=mark read  R=mark all read  d=delete     │
+│  j/k=navigate  N or Esc=close                                   │
+└─────────────────────────────────────────────────────────────────┘
+
+Keybindings:
+  j/k          Navigate notifications
+  Enter        Navigate to the related item (task, conversation, etc.)
+  r            Mark selected notification as read
+  R            Mark all notifications as read
+  d            Delete selected notification
+  N or Esc     Close overlay
+```
+
+### 5.19 Screen: Stats & Achievements
+
+Accessible via command palette (`: goto stats`) or `mynow tui --screen stats`.
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  📊 STATS & ACHIEVEMENTS                     [Tab=switch view]  │
+│  ─────────────────────────────────────────────────────────────  │
+│  [Overview] [Pomodoro] [Habits] [Achievements] [Usage]          │
+│                                                                 │
+│  OVERVIEW — Last 30 Days                                        │
+│                                                                 │
+│  Tasks completed:     47   ████████████░░░░  avg 1.6/day       │
+│  Habits completed:    82   ██████████████░░  89% rate           │
+│  Focus time:        38.5h  █████████░░░░░░░  avg 1.3h/day      │
+│  Pomodoros done:      52   ████████████░░░░  84% completion     │
+│                                                                 │
+│  Current streak:  12 days 🔥                                   │
+│  Best day:        Mar 2  (8 tasks + 3.5h focus)                │
+│                                                                 │
+│  ACHIEVEMENTS (12 unlocked, 1,450 pts)                          │
+│  🏆 First Task  🔥 Week Warrior  ⚡ Power Hour  🎯 Inbox Zero  │
+│                                                                 │
+│  NEXT ACHIEVEMENT                                               │
+│  🌟 Century Club — 100-day habit streak                        │
+│  Progress: ████████████░░░░░░░░░░  45/100 days                 │
+│                                                                 │
+│  ─────────────────────────────────────────────────────────────  │
+│  Tab=switch view  a=all achievements  q=back                    │
+└─────────────────────────────────────────────────────────────────┘
+
+Keybindings:
+  Tab          Cycle between Overview / Pomodoro / Habits / Achievements / Usage
+  a            Show full achievements list (unlocked + available)
+  j/k          Navigate achievement list
+  Enter        Show achievement detail
+  q / Esc      Go back
+```
+
+**Pomodoro sub-view:**
+
+```
+│  POMODORO STATS — Last 30 Days                                  │
+│                                                                 │
+│  Sessions:   62 total  ·  52 completed (84%)  ·  10 cancelled  │
+│  Focus:    21.7h  ·  Break: 5.4h  ·  Interruptions: 8         │
+│  Best hour: 10 AM  ·  Avg session: 22.3 min                    │
+│                                                                 │
+│  WEEKLY BAR CHART                                               │
+│  Week of Mar 2:   ██████████████████████  12  sessions  5.0h  │
+│  Week of Feb 24:  ████████████████████████████  15  6.3h      │
+│  Week of Feb 17:  █████████████████  9  3.8h                  │
+```
+
+### 5.20 Screen: AI Chat
+
+Accessible via command palette (`: ai chat`), `mynow tui --screen ai`, or `N` on an
+AI-related notification. Provides streaming text chat with Kaia inside the TUI.
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  🤖 KAIA — AI Chat             [Conv: Task prioritization ▼]   │
+│  ─────────────────────────────────────────────────────────────  │
+│                                                                 │
+│  You: How should I prioritize today?                           │
+│                                                                 │
+│  Kaia: Good morning! Looking at your schedule, I'd suggest     │
+│  starting with "Prepare quarterly report" — it's your most     │
+│  critical item and your calendar is clear until 9 AM, giving  │
+│  you a solid 90-minute window. After your standup, tackle the  │
+│  production bug since it's also critical and 30 minutes.       │
+│                                                                 │
+│  You: What about the production bug?                           │
+│                                                                 │
+│  Kaia: The production bug is also marked Critical and is       │
+│  overdue by 1 day. I'd prioritize it right after the report... │
+│                                                                 │
+│  ─────────────────────────────────────────────────────────────  │
+│  > type your message here...                                   █│
+│  ─────────────────────────────────────────────────────────────  │
+│  Enter=send  Shift+Enter=newline  Ctrl+L=clear  n=new conv     │
+│  h=history  q=back  (3 messages, 17 remaining in thread)       │
+└─────────────────────────────────────────────────────────────────┘
+
+Keybindings:
+  Enter           Send message
+  Shift+Enter     Insert newline (multiline message)
+  Ctrl+L          Clear current input
+  n               Start a new conversation
+  h               Open conversation history picker
+  Esc / q         Return to previous screen (conversation auto-saved)
+
+Conversation picker (h):
+  Shows list of recent conversations with title and message count.
+  Enter to switch, d to delete, a to archive.
+```
 
 ---
 
@@ -1803,6 +3036,7 @@ Supports tab completion and fuzzy matching.
 | `/` | Search |
 | `?` | Help |
 | `:` | Command palette |
+| `N` (Shift+N) | Notifications overlay |
 
 ### 6.5 Screen-Specific Keys
 
@@ -1900,12 +3134,12 @@ DESCRIPTION
        for daily use.
 
 COMMANDS
-       task        Manage tasks (add, list, edit, done, snooze, archive)
+       task        Manage tasks (add, list, edit, done, snooze, archive, comment, share)
        inbox       Manage inbox items (add, list, process, count)
        now         Current focus view
        compass     AI-powered daily briefing
        habit       Habit tracking and streaks
-       chore       Household chore management
+       chore       Household chore management (including rotation)
        calendar    Calendar events
        timer       Timers, alarms, and pomodoro
        grocery     Grocery list management
@@ -1916,6 +3150,14 @@ COMMANDS
        review      Daily/weekly review workflows
        memory      Memory store and recall
        household   Household and member management
+       shared-inbox Tasks shared with you by household members
+       notifications In-app notification management
+       stats       Productivity statistics and AI usage
+       achievements Gamification achievements and streaks
+       export      Data export (JSON/CSV/iCal)
+       account     Account info, subscription, billing, deletion
+       apikey      API key management for programmatic access
+       ai          AI conversation management (Kaia chat)
        login       Authenticate with MYN
        logout      Clear credentials
        whoami      Show current user
@@ -2313,11 +3555,21 @@ Complete mapping of CLI commands to MYN API endpoints.
 | `compass complete` | POST | `/api/v2/compass/complete` |
 | `compass status` | GET | `/api/v2/compass/status` |
 | `timer list` | GET | `/api/v2/timers` |
-| `timer start` | POST | `/api/v2/timers` (type=COUNTDOWN) |
-| `timer pomodoro` | POST | `/api/v2/timers` (type=POMODORO) |
-| `timer alarm` | POST | `/api/v2/timers` (type=ALARM) |
-| `timer cancel <id>` | DELETE | `/api/v2/timers/{id}` |
+| `timer start` | POST | `/api/v2/timers/countdown` |
+| `timer alarm` | POST | `/api/v2/timers/alarm` |
+| `timer cancel <id>` | POST | `/api/v2/timers/{id}/cancel` |
 | `timer snooze <id>` | POST | `/api/v2/timers/{id}/snooze` |
+| `timer pomodoro` | POST | `/api/v1/pomodoro/start` |
+| `timer pomodoro smart` | POST | `/api/v1/pomodoro/smart-start` |
+| `timer pomodoro current` | GET | `/api/v1/pomodoro/current` |
+| `timer pomodoro pause` | POST | `/api/v1/pomodoro/pause` |
+| `timer pomodoro resume` | POST | `/api/v1/pomodoro/resume` |
+| `timer pomodoro stop` | POST | `/api/v1/pomodoro/stop` |
+| `timer pomodoro complete` | POST | `/api/v1/pomodoro/complete` |
+| `timer pomodoro history` | GET | `/api/v1/pomodoro/sessions` |
+| `timer pomodoro settings` | GET | `/api/v1/pomodoro/settings` |
+| `timer pomodoro settings --work` | PUT | `/api/v1/pomodoro/settings` |
+| `stats pomodoro` | GET | `/api/v1/pomodoro/stats` |
 | `grocery` | GET | `/api/v1/households/{hid}/grocery-list` |
 | `grocery add` | POST | `/api/v1/households/{hid}/grocery-list/items` |
 | `grocery add-bulk` | POST | `/api/v1/households/{hid}/grocery-list/items/bulk` |
@@ -2342,6 +3594,52 @@ Complete mapping of CLI commands to MYN API endpoints.
 | `household` | GET | `/api/v1/customers/me` (extract households) |
 | `household members` | GET | `/api/v1/households/{hid}/members` |
 | `household invite` | POST | `/api/v1/households/{hid}/invites` |
+| `task comment list <id>` | GET | `/api/v2/unified-tasks/{id}/comments` |
+| `task comment add <id>` | POST | `/api/v2/unified-tasks/{id}/comments` |
+| `task comment edit <id> <cid>` | PUT | `/api/v2/unified-tasks/{id}/comments/{cid}` |
+| `task comment delete <id> <cid>` | DELETE | `/api/v2/unified-tasks/{id}/comments/{cid}` |
+| `task comment count <id>` | GET | `/api/v2/unified-tasks/{id}/comments/count` |
+| `task share <id>` | POST | `/api/v2/unified-tasks/{id}/share` |
+| `task share respond <id>` | POST | `/api/v2/unified-tasks/{id}/share/respond` |
+| `task share revoke <id>` | DELETE | `/api/v2/unified-tasks/{id}/share/{memberId}` |
+| `task share list <id>` | GET | `/api/v2/unified-tasks/{id}/shares` |
+| `shared-inbox` | GET | `/api/v2/unified-tasks/shared-with-me` |
+| `chore rotation <id>` | GET | `/api/v2/unified-tasks/{id}/rotation/status` |
+| `chore rotation advance <id>` | POST | `/api/v2/unified-tasks/{id}/rotation/advance` |
+| `chore rotation reset <id>` | POST | `/api/v2/unified-tasks/{id}/rotation/reset` |
+| `chore rotation order <id>` | PUT | `/api/v2/unified-tasks/{id}/rotation/order` |
+| `notifications` | GET | `/api/v2/notifications` |
+| `notifications unread` | GET | `/api/v2/notifications/unread` |
+| `notifications read <id>` | POST | `/api/v2/notifications/mark-read` |
+| `notifications read-all` | POST | `/api/v2/notifications/mark-read` (markAll=true) |
+| `notifications delete <id>` | DELETE | `/api/v2/notifications/{id}` |
+| `stats` | GET | `/api/v1/gamification/streaks` (+ pomodoro/stats) |
+| `stats pomodoro` | GET | `/api/v1/pomodoro/stats` |
+| `stats usage` | GET | `/api/v1/token-usage/my-usage` |
+| `achievements` | GET | `/api/v1/gamification/achievements` |
+| `achievements streaks` | GET | `/api/v1/gamification/streaks` |
+| `export` | POST | `/api/v1/customers/request-export` |
+| `export list` | GET | `/api/v1/customers/exports` |
+| `export download <id>` | GET | `/api/v1/customers/exports/{id}/download` |
+| `export delete <id>` | DELETE | `/api/v1/customers/exports/{id}` |
+| `account` | GET | `/api/v1/customers` |
+| `account usage` | GET | `/api/v1/usage/today` |
+| `account subscription` | GET | `/api/v1/usage/limits` |
+| `account billing` | POST | `/api/payments/create-customer-portal-session` |
+| `account delete` | POST | `/api/v1/account-deletion/request` |
+| `account delete cancel` | POST | `/api/v1/account-deletion/cancel` |
+| `account delete status` | GET | `/api/v1/account-deletion/status` |
+| `apikey list` | GET | `/api/v1/api-keys` |
+| `apikey create` | POST | `/api/v1/api-keys` |
+| `apikey show <id>` | GET | `/api/v1/api-keys/{id}` |
+| `apikey update <id>` | PUT | `/api/v1/api-keys/{id}` |
+| `apikey revoke <id>` | DELETE | `/api/v1/api-keys/{id}` |
+| `ai chat` | POST | `/api/ai/chat/stream` (SSE streaming) |
+| `ai conversations` | GET | `/api/v1/ai/conversations` |
+| `ai conversations show <id>` | GET | `/api/v1/ai/conversations/{id}/messages` |
+| `ai conversations archive <id>` | PATCH | `/api/v1/ai/conversations/{id}/status` |
+| `ai conversations delete <id>` | DELETE | `/api/v1/ai/conversations/{id}` |
+| `ai conversations continue <id>` | POST | `/api/v1/ai/conversations/{id}/continue` |
 
 ---
 
@@ -2402,3 +3700,294 @@ The CLI accepts multiple date formats:
 | `TTh` | `FREQ=WEEKLY;BYDAY=TU,TH` |
 
 Full RRULE strings also accepted directly.
+
+---
+
+## Appendix F: YNAB Plugin Specification
+
+The YNAB integration is delivered as an optional plugin (`mynow-ynab` or `ynab.so`).
+The MYN backend provides the full YNAB OAuth + budget API at `/api/v1/ynab/`.
+
+### F.1 Authentication
+
+YNAB OAuth 2.0 is handled server-side by the MYN backend:
+
+```
+mynow ynab connect          # Open browser → MYN redirects to YNAB OAuth
+mynow ynab disconnect        # Revoke YNAB connection
+mynow ynab status            # Show connection status + default budget
+```
+
+### F.2 Budget Commands
+
+```
+mynow ynab budget            # Budget overview (Ready to Assign, Age of Money)
+mynow ynab budget accounts   # All accounts grouped by type (checking/savings/credit/loans)
+mynow ynab budget categories # All category groups with balances
+mynow ynab budget months     # Monthly budget history
+```
+
+**Budget overview output:**
+```
+  YNAB BUDGET — Family Budget
+
+  Ready to Assign:  $234.50
+  Age of Money:     18 days
+
+  ACCOUNTS
+  Checking (Chase)        $3,421.22    Savings (Ally)    $12,450.00
+  Visa Credit Card       -$1,203.45    Student Loan     -$8,500.00
+
+  Net Worth:  $6,167.77
+```
+
+### F.3 Transaction Commands
+
+```
+mynow ynab transactions [--since <date>]
+mynow ynab transactions add [flags]       # Create a transaction
+mynow ynab transactions bulk [flags]      # Bulk create from stdin (CSV)
+mynow ynab transactions bill <task-id>    # Record bill payment linked to MYN task
+```
+
+**Create transaction flags:**
+```
+  --account <id|name>     Account to post to
+  --payee <name>          Payee name
+  --category <name>       Budget category
+  --amount <dollars>      Amount in dollars (positive=inflow, negative=outflow)
+  --date <date>           Transaction date (default: today)
+  --memo <text>           Memo
+```
+
+### F.4 Analytics Commands
+
+```
+mynow ynab analytics spending [--months 3]   # Category spending breakdown
+mynow ynab analytics payees [--months 3]     # Top payees by frequency/amount
+mynow ynab analytics trends [--months 6]     # Monthly income vs spending
+mynow ynab analytics net-worth               # Net worth summary
+mynow ynab analytics debt                    # Debt tracking and payoff timeline
+```
+
+### F.5 TUI Integration
+
+When the YNAB plugin is enabled, a `YNAB` tab appears in the tab bar (accessible via `0`).
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ ● mynow  Now  Inbox  Tasks  Habits  Chores  Cal  ⏱  🛒  ⚙  💰 │
+├─────────────────────────────────────────────────────────────────┤
+│  💰 YNAB — Family Budget                                        │
+│                                                                 │
+│  Ready to Assign:  $234.50    Age of Money:  18 days           │
+│                                                                 │
+│  [Overview] [Accounts] [Categories] [Transactions] [Analytics] │
+│                                                                 │
+│  SPENDING THIS MONTH (top categories)                           │
+│  Groceries          $342.50  ████████████░░  +$42 over budget  │
+│  Restaurants        $156.00  ████████░░░░░░  on track          │
+│  Transportation      $89.45  ████░░░░░░░░░░  $60 remaining     │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### F.6 API Endpoint Mapping (YNAB Plugin)
+
+| Command | Method | Endpoint |
+|---------|--------|----------|
+| `ynab connect` | GET | `/api/v1/ynab/authorize` (browser redirect) |
+| `ynab disconnect` | POST | `/api/v1/ynab/disconnect` |
+| `ynab status` | GET | `/api/v1/ynab/status` |
+| `ynab budget` | GET | `/api/v1/ynab/budget/overview` |
+| `ynab budget accounts` | GET | `/api/v1/ynab/budget/accounts` |
+| `ynab budget categories` | GET | `/api/v1/ynab/budget/categories` |
+| `ynab budget months` | GET | `/api/v1/ynab/budget/months` |
+| `ynab transactions` | GET | `/api/v1/ynab/transactions` |
+| `ynab transactions add` | POST | `/api/v1/ynab/transactions` |
+| `ynab transactions bulk` | POST | `/api/v1/ynab/transactions/bulk` |
+| `ynab transactions bill <id>` | POST | `/api/v1/ynab/transactions/bill-payment/{taskId}` |
+| `ynab analytics spending` | GET | `/api/v1/ynab/analytics/spending` |
+| `ynab analytics payees` | GET | `/api/v1/ynab/analytics/payees` |
+| `ynab analytics trends` | GET | `/api/v1/ynab/analytics/trends` |
+| `ynab analytics net-worth` | GET | `/api/v1/ynab/analytics/net-worth` |
+| `ynab analytics debt` | GET | `/api/v1/ynab/analytics/debt` |
+
+---
+
+## Appendix G: Notification Types
+
+Reference for all notification event types that can appear in `mynow notifications`.
+
+| Event Type | Trigger | Related Item |
+|------------|---------|--------------|
+| `COMMENT` | New comment on a task you own or share | task |
+| `MENTION` | @-mentioned in a comment | task |
+| `TASK_ASSIGNED` | A task was shared with you | task |
+| `TASK_COMPLETED` | A shared task was completed | task |
+| `TASK_UPDATE` | A task you shared was updated | task |
+| `HOUSEHOLD_INVITE` | You received a household invitation | household |
+| `HOUSEHOLD_MEMBER_JOINED` | Someone joined your household | household |
+| `CHORE_ROTATION` | A chore rotation has advanced to you | chore |
+| `AI_MESSAGE` | Kaia sent a proactive message | conversation |
+| `TIMER_COMPLETE` | A countdown timer or alarm fired | timer |
+| `TASK_REMINDER` | A task-linked reminder fired | task |
+
+---
+
+## Appendix H: Internal File Structure (complete)
+
+Updated internal package structure including all new features:
+
+```
+cmd/mynow/
+  main.go                   Version vars, root Cobra command, global flags
+
+internal/
+  app/
+    tasks.go                Task CRUD, complete, archive, snooze, move
+    habits.go               Habit complete, skip, streak, chains, schedule, reminders
+    chores.go               Chore list, complete, schedule, rotation
+    inbox.go                Inbox list, add, process, count
+    compass.go              Compass generate, correct, complete, status
+    calendar.go             Calendar events CRUD, decline, skip
+    timers.go               Countdown, alarm
+    pomodoro.go             Pomodoro start, smart-start, pause, resume, stop, complete,
+                            current, history, settings, stats, suggestions
+    lists.go                Grocery CRUD, bulk add, check, clear, convert
+    projects.go             Project CRUD, move tasks
+    planning.go             AI plan, auto-schedule, reschedule
+    search.go               Unified search
+    profile.go              Whoami, goals, prefs, coaching intensity
+    memory.go               Memory CRUD, search, export
+    household.go            Household CRUD, members, invites
+    comments.go             Task comment CRUD
+    sharing.go              Task share, respond, revoke, shared-inbox
+    notifications.go        Notification list, read, read-all, delete
+    stats.go                Productivity stats, AI usage stats
+    achievements.go         Achievements, streaks, leaderboard
+    export.go               Data export request, list, download, delete
+    account.go              Account info, usage, subscription, billing, deletion
+    apikeys.go              API key CRUD
+    ai.go                   AI chat (streaming), conversation CRUD
+    ynab.go                 YNAB connect, budget, transactions, analytics (plugin)
+
+  api/
+    client.go               Base HTTP, auth injection, retry, SSE streaming
+    tasks.go                /api/v2/unified-tasks
+    habits.go               /api/v1/habit-chains
+    chores.go               /api/v2/chores
+    compass.go              /api/v2/compass
+    calendar.go             /api/v2/calendar
+    timers.go               /api/v2/timers
+    pomodoro.go             /api/v1/pomodoro
+    lists.go                /api/v1/households/.../grocery-list
+    projects.go             /api/project
+    planning.go             /api/schedules
+    search.go               /api/v2/search
+    profile.go              /api/v1/customers
+    memory.go               /api/v1/customers/memories
+    household.go            /api/v1/households
+    comments.go             /api/v2/unified-tasks/{id}/comments
+    sharing.go              /api/v2/unified-tasks/{id}/share
+    notifications.go        /api/v2/notifications
+    gamification.go         /api/v1/gamification
+    export.go               /api/v1/customers/exports
+    account.go              /api/v1/account-deletion, /api/payments, /api/v1/usage
+    apikeys.go              /api/v1/api-keys
+    ai.go                   /api/ai/chat/stream, /api/v1/ai/conversations
+    ynab.go                 /api/v1/ynab (plugin)
+
+  auth/
+    oauth.go                Browser PKCE flow
+    device.go               Device authorization flow
+    keyring.go              Linux Secret Service (GNOME Keyring / KDE Wallet)
+    apikey.go               API key credential storage
+    tokens.go               Token refresh, in-memory access token cache
+
+  config/
+    config.go               XDG config, env vars, YAML config file
+
+  output/
+    formatter.go            Text / JSON / table / quiet modes
+    table.go                Column-aligned text tables
+    color.go                ANSI color support with --no-color
+    markdown.go             Glamour markdown rendering
+    progress.go             Progress bars, streaming output for AI chat
+
+  tui/
+    app.go                  Root Bubble Tea model, screen router, tab management
+    screens/
+      now.go                Now (focus) screen
+      inbox.go              Inbox screen + processing mode
+      next_actions.go       Tasks screen with filter panel
+      habits.go             Habits screen with 7-day grid
+      chores.go             Chores screen with rotation info
+      calendar.go           Calendar screen (day/week/agenda)
+      compass.go            Compass briefing screen
+      timers.go             Timers screen (countdown + alarms)
+      pomodoro.go           Pomodoro focus mode screen (5.17)
+      grocery.go            Grocery list screen
+      projects.go           Project list and detail
+      task_detail.go        Task/habit/chore detail overlay
+      search.go             Search overlay
+      settings.go           Settings screen
+      help.go               Help overlay
+      notifications.go      Notifications overlay (5.18)
+      stats.go              Stats & achievements screen (5.19)
+      ai_chat.go            AI chat screen (5.20)
+    components/
+      task_list.go          Filterable, sortable task list
+      task_row.go           Single task row rendering
+      priority_badge.go     Priority zone indicator
+      streak_bar.go         Habit streak visualization
+      timer_display.go      Countdown/pomodoro circular display
+      pomodoro_ring.go      Pomodoro progress ring
+      input.go              Text input field
+      confirm.go            Confirmation dialog
+      toast.go              Transient notification banner
+      statusbar.go          Bottom status bar (with notification badge)
+      tabs.go               Tab bar navigation
+      modal.go              Modal overlay
+      calendar_grid.go      Week/month calendar grid
+      comment_list.go       Task comment list with Markdown rendering
+      progress_bar.go       Horizontal progress bar (achievements, usage)
+      chart_bar.go          ASCII bar chart (stats screen)
+      sse_reader.go         SSE stream reader for AI chat streaming
+
+plugins/
+  plugin.go               Plugin interface, loading, command injection
+  ynab/                   YNAB plugin (reference implementation)
+    plugin.go
+
+test/
+  integration/
+    setup.go              Docker Compose lifecycle, health wait
+    docker-compose.yml    PostgreSQL 16 + Redis 7 + MYN Spring Boot
+    demo_account_test.go  Bootstrap test data
+    auth_test.go
+    tasks_test.go
+    habits_test.go
+    chores_test.go
+    calendar_test.go
+    compass_test.go
+    timers_test.go
+    pomodoro_test.go      Pomodoro start, smart-start, settings, stats
+    grocery_test.go
+    projects_test.go
+    planning_test.go
+    search_test.go
+    profile_test.go
+    memory_test.go
+    household_test.go
+    review_test.go
+    comments_test.go      Task comment CRUD
+    sharing_test.go       Task share flows, shared-inbox
+    notifications_test.go
+    stats_test.go
+    achievements_test.go
+    export_test.go
+    account_test.go
+    apikeys_test.go
+    ai_test.go            AI chat + conversation history
+    cli_output_test.go    JSON, quiet, no-color output modes
+```

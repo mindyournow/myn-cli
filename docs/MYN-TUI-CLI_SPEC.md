@@ -38,7 +38,7 @@
 
 Appendices: A (API Endpoints) · B (Priority Zones) · C (Date Parsing) ·
 D (Duration Parsing) · E (Recurrence Shortcuts) · F (YNAB Plugin) ·
-G (Notification Types) · H (Internal File Structure)
+G (Notification Types) · H (Internal File Structure) · I (Request/Response Structures)
 
 ---
 
@@ -87,7 +87,7 @@ internal/
   api/              HTTP client (one method per API endpoint)
     client.go       Base HTTP, auth injection, retry, SSE reader
     tasks.go        /api/v2/unified-tasks
-    habits.go       /api/v1/habit-chains
+    habits.go       /api/habits/chains, /api/habits/reminders, /api/v2/scheduling/habits
     chores.go       /api/v2/chores
     compass.go      /api/v2/compass
     calendar.go     /api/v2/calendar
@@ -204,28 +204,51 @@ mynow login --api-key
   API key stored in keyring.
 ```
 
-- Validates key via `GET /api/v1/customers/me`
+- Validates key via `GET /api/v1/customers/me` (key in `X-API-KEY` header)
 - Stores in Linux Secret Service under service=`mynow`, account=`api-key`
-- All subsequent requests use `X-API-KEY` header
+- All subsequent requests use `X-API-KEY: myn_...` header (not `Authorization: Bearer`)
 
 ### 2.3 OAuth 2.0 PKCE Flow
 
 ```
 mynow login
+> Registering CLI client with MYN...
 > Opening browser for authentication...
 > Waiting for callback on http://localhost:19283/callback
 ✓ Authenticated as John Doe (john@example.com)
   Refresh token stored in keyring.
 ```
 
-- Generates code verifier + challenge
-- Opens browser to MYN auth endpoint
-- Starts local HTTP server on ephemeral port to receive callback
-- Exchanges authorization code for access + refresh tokens
-- Stores refresh token in keyring; access token in memory only
-- Auto-refreshes access token on 401
+**OAuth Endpoints (all under the MYN backend):**
+
+| Step | Method | Path |
+|------|--------|------|
+| Discover | GET | `/.well-known/oauth-authorization-server` |
+| Register client | POST | `/api/mcp/oauth/register` |
+| Authorize | GET | `/api/mcp/oauth/authorize` |
+| Exchange code | POST | `/api/mcp/oauth/token` (`grant_type=authorization_code`) |
+| Refresh token | POST | `/api/mcp/oauth/token` (`grant_type=refresh_token`) |
+| Logout/revoke | POST | `/api/mcp/oauth/logout` |
+
+**PKCE parameters:**
+- `code_challenge_method=S256` (only S256 supported)
+- `code_challenge = Base64URL(SHA256(code_verifier))`
+- `scope=mcp`
+
+**Flow details:**
+1. Register a dynamic CLI client: `POST /api/mcp/oauth/register` → receives `client_id` (format: `mcp_<16chars>`)
+2. Open browser: `GET /api/mcp/oauth/authorize?response_type=code&client_id=...&redirect_uri=http://localhost:PORT/callback&code_challenge=...&code_challenge_method=S256&state=...`
+3. Local HTTP server on ephemeral port receives `?code=...&state=...`
+4. Exchange: `POST /api/mcp/oauth/token` with `grant_type=authorization_code&code=...&redirect_uri=...&code_verifier=...`
+5. Response: `{ access_token, token_type: "Bearer", expires_in: 3600, refresh_token, scope: "mcp" }`
+6. Store refresh token in keyring; access token in memory
+7. Auto-refresh on 401 using `POST /api/mcp/oauth/token` with `grant_type=refresh_token`
+
+**Token TTLs:** Access token = 1 hour · Refresh token = 10 years (effectively permanent) · Auth codes = 5 minutes
 
 ### 2.4 Device Authorization Flow
+
+> **Note:** Device authorization flow is not yet supported by the MYN backend. This section describes the planned behavior.
 
 ```
 mynow login --device
@@ -350,13 +373,15 @@ Flags:
   --priority <zone>     Filter: critical, opportunity, horizon, parking
   --type <type>         Filter: task, habit, chore (default: all)
   --project <name|id>   Filter by project
-  --completed           Include completed tasks
-  --archived            Include archived tasks
+  --completed           Include completed tasks (isCompleted=true)
+  --archived            Show archived tasks (GET /api/v2/unified-tasks/archived)
   --today               Only tasks with startDate = today
   --overdue             Only tasks past their startDate
+  --household           Include household-shared tasks (includeHousehold=true)
   --sort <field>        Sort by: priority, date, title, created (default: priority)
   --reverse             Reverse sort order
-  --limit <n>           Max results (default: 50)
+  --page <n>            Page number (default: 0)
+  --limit <n>           Page size (default: 50, max: 200)
 
 Examples:
   mynow task list                         # All active tasks
@@ -384,7 +409,7 @@ Output format (text):
 
 #### `mynow task add <title>`
 
-Create a new task.
+Create a new task. The CLI generates a UUID for each task (the API requires a client-provided `id`).
 
 ```
 mynow task add <title> [flags]
@@ -468,12 +493,60 @@ Output:
   ✓ Archived: "Prepare quarterly report"
 ```
 
-#### `mynow task delete <id>`
+#### `mynow task uncomplete <id>`
 
-Delete a task (asks for confirmation unless --force).
+Undo a task completion (mark as not done).
 
 ```
-mynow task delete <id> [--force]
+mynow task uncomplete <id>
+
+Output:
+  ↩ Uncompleted: "Prepare quarterly report"
+```
+
+#### `mynow task delete <id>`
+
+Soft-delete a task (recoverable via `task restore`). Use `--permanent` for irreversible deletion.
+
+```
+mynow task delete <id> [flags]
+
+Flags:
+  --force       Skip confirmation prompt
+  --permanent   Irreversibly delete (no restore possible)
+
+Output:
+  ✓ Deleted: "Prepare quarterly report"
+    Restore: mynow task restore <id>
+```
+
+#### `mynow task restore <id>`
+
+Restore a soft-deleted task.
+
+```
+mynow task restore <id>
+
+Output:
+  ✓ Restored: "Prepare quarterly report"
+```
+
+#### `mynow task batch`
+
+Update multiple tasks at once.
+
+```
+mynow task batch --ids <id1,id2,...> [flags]
+
+Flags:
+  --ids <list>          Comma-separated task IDs
+  --priority <zone>     Set priority for all
+  --project <name|id>   Move all to project
+  --date <date>         Set start date for all
+
+Examples:
+  mynow task batch --ids abc123,def456 --priority opportunity
+  mynow task batch --ids abc123,def456,ghi789 --project "Q1 Planning"
 ```
 
 #### `mynow task snooze <id>`
@@ -591,7 +664,7 @@ mynow now focus --clear            # Clear focus
 
 #### `mynow compass`
 
-Show the latest compass briefing.
+Show the current compass briefing. Uses `GET /api/v2/compass/current`.
 
 ```
 mynow compass
@@ -601,36 +674,39 @@ Output: (renders briefing summary as markdown via Glamour)
 
 #### `mynow compass generate`
 
-Generate a new compass briefing.
+Generate a new compass briefing. Uses `POST /api/v2/compass/generate`.
 
 ```
 mynow compass generate [flags]
 
 Flags:
-  --context <text>        Context for the AI (e.g., "busy morning, low energy")
-  --focus <areas>         Comma-separated focus areas
+  --type <type>           Briefing type: daily, evening, weekly, weekly-and-daily, on-demand
+                          (default: on-demand, max 3/day)
+  --async                 Don't wait for result (default: wait, uses sync generation)
 
 Examples:
   mynow compass generate
-  mynow compass generate --context "Working from home" --focus "health,deadlines"
+  mynow compass generate --type evening
 ```
 
 #### `mynow compass correct`
 
-Submit a mid-day correction.
+Submit course corrections to an active compass session.
+Uses `POST /api/v2/compass/corrections/apply`.
 
 ```
-mynow compass correct <type> [flags]
-
-Types: completed, missed, rescheduled, added, priority-changed, other
+mynow compass correct [flags]
 
 Flags:
+  --summary-id <id>       Compass summary ID (default: current session)
   --task <id>             Related task ID
-  --reason <text>         Why the correction
+  --decision <type>       accepted | rejected | modified | completed | archived
+  --new-date <date>       Modified start date (for modified decision)
+  --reason <text>         User reason for correction
 
 Examples:
-  mynow compass correct completed --task abc123 --reason "Finished early"
-  mynow compass correct priority-changed --task abc123
+  mynow compass correct --task abc123 --decision completed --reason "Finished early"
+  mynow compass correct --task abc123 --decision modified --new-date tomorrow
 ```
 
 #### `mynow compass complete`
@@ -650,7 +726,7 @@ Examples:
 
 #### `mynow compass status`
 
-Show current compass session state.
+Show current compass session state. Uses `GET /api/v2/compass/status`.
 
 ```
 mynow compass status
@@ -660,6 +736,23 @@ Output:
   Briefing ID: 550e8400-...
   Pending corrections: 2
   Last briefing: 8:30 AM today
+  Auto-generation: enabled
+```
+
+#### `mynow compass history`
+
+Show compass briefing history. Uses `GET /api/v2/compass/history`.
+
+```
+mynow compass history [--limit <n>]
+
+Output:
+  COMPASS HISTORY
+
+  Mar 9  08:30  Daily     ✓ completed   3 corrections applied
+  Mar 8  08:15  Daily     ✓ completed   1 correction applied
+  Mar 7  09:00  Daily     — no session
+  Mar 6  08:45  Evening   ✓ completed
 ```
 
 ### 4.6 Habit Commands
@@ -683,7 +776,7 @@ Output:
 
 #### `mynow habit done <id>`
 
-Complete a habit for today. Uses the same `POST /complete` endpoint as tasks.
+Complete a habit for today. Uses `POST /api/v2/unified-tasks/{id}/complete`.
 
 ```
 mynow habit done abc123
@@ -695,7 +788,7 @@ Output:
 
 #### `mynow habit skip <id>`
 
-Skip a habit without breaking the streak.
+Skip a habit without breaking the streak. Uses `POST /api/v2/unified-tasks/{id}/skip`.
 
 ```
 mynow habit skip <id> [flags]
@@ -710,7 +803,7 @@ Examples:
 
 #### `mynow habit streak <id>`
 
-Show detailed streak information.
+Show detailed streak information. Uses `GET /api/v2/unified-tasks/{id}/streak`.
 
 ```
 mynow habit streak abc123 [--history]
@@ -730,12 +823,17 @@ Output:
 
 #### `mynow habit chains`
 
-List habit chains.
+List habit chains. Uses `GET /api/habits/chains`. Additional chain management:
 
 ```
-mynow habit chains
+mynow habit chains                          # List all chains
+mynow habit chains create <name>            # Create a chain (POST /api/habits/chains)
+mynow habit chains add <chain-id> <habit-id>    # Add habit to chain
+mynow habit chains remove <chain-id> <habit-id> # Remove habit from chain
+mynow habit chains status <chain-id>        # Chain completion status today
+mynow habit chains done <chain-id>          # Batch complete all habits in chain
 
-Output:
+Output (list):
   Morning Routine (4 habits)
     1. Morning meditation    15m
     2. Journal               10m
@@ -745,7 +843,8 @@ Output:
 
 #### `mynow habit schedule`
 
-Show upcoming habit schedule.
+Trigger AI scheduling for habits and show upcoming schedule.
+Uses `POST /api/v2/scheduling/habits/schedule?numberOfDays=<n>`.
 
 ```
 mynow habit schedule [--days <n>]
@@ -1017,13 +1116,27 @@ Toggle an item's checked state.
 mynow grocery check <id>
 ```
 
+#### `mynow grocery delete <id>`
+
+Delete a specific grocery item.
+
+```
+mynow grocery delete <id> [--force]
+Output:
+  ✓ Deleted: "Avocados"
+```
+
+API: `DELETE /api/v1/households/{hid}/grocery-list/{id}`
+
 #### `mynow grocery clear`
 
-Clear checked items from the list.
+Clear all checked items from the list.
 
 ```
 mynow grocery clear [--force]
 ```
+
+API: `DELETE /api/v1/households/{hid}/grocery-list/checked`
 
 #### `mynow grocery convert`
 
@@ -1138,17 +1251,21 @@ Examples:
 
 ### 4.13 Search Command
 
+Uses `GET /api/v2/search` with query parameters (not POST with body).
+Searchable types: `TASK`, `HABIT`, `CHORE`, `GROCERY`. Results are paginated.
+
 ```
 mynow search <query> [flags]
 
 Flags:
-  --type <types>          Comma-separated: task,habit,chore,event,project,note,memory
-  --priority <zone>       Filter by priority
-  --status <status>       Filter: pending, completed
-  --project <name|id>     Filter by project
-  --from <date>           Results from this date
-  --to <date>             Results to this date
-  --limit <n>             Max results (default: 20)
+  --type <types>          Comma-separated: TASK,HABIT,CHORE,GROCERY (default: all)
+  --priority <zones>      Comma-separated: CRITICAL,OPPORTUNITY_NOW,OVER_THE_HORIZON,PARKING_LOT
+  --status <status>       Comma-separated: pending, completed, incomplete
+  --from <date>           Filter by startDate >= date (YYYY-MM-DD)
+  --to <date>             Filter by startDate <= date (YYYY-MM-DD)
+  --include-archived      Include archived items (default: false)
+  --limit <n>             Max results (default: 20, max: 100)
+  --offset <n>            Pagination offset (default: 0)
 
 Examples:
   mynow search "quarterly report"
@@ -1204,19 +1321,45 @@ Examples:
   mynow prefs get ai.tone
 ```
 
-### 4.15 Memory Commands
+#### `mynow prefs coaching`
+
+Get or set the AI coaching intensity. Controls how proactively Kaia nudges you.
 
 ```
-mynow memory list [--limit <n>]                # List recent memories
-mynow memory show <id>                         # Show specific memory
-mynow memory add <content> [flags]             # Store a memory
+mynow prefs coaching                           # Show current coaching intensity
+mynow prefs coaching <level>                   # Set level: off, gentle, proactive
+
+Output:
+  Coaching intensity: GENTLE
+  Kaia will offer suggestions when you complete tasks or miss habits.
+
+Examples:
+  mynow prefs coaching off          # Disable proactive AI coaching
+  mynow prefs coaching gentle       # Subtle suggestions only
+  mynow prefs coaching proactive    # Active coaching and reminders
+```
+
+API: `GET /api/v1/customers/coaching-intensity` / `PUT /api/v1/customers/coaching-intensity`
+
+### 4.15 Memory Commands
+
+> Note: There is no GET-by-ID endpoint for memories — the backend returns all memories as a list via `GET /api/v1/customers/memories`. `memory show <id>` filters client-side.
+
+```
+mynow memory list [--limit <n>]                # List all memories (GET /api/v1/customers/memories)
+mynow memory show <id>                         # Show specific memory (client-side filter)
+mynow memory add <content> [flags]             # Store a memory (POST /api/v1/customers/memories)
   --category <cat>       user_preference, work_context, personal_info, decision, insight, routine
   --tags <tags>          Comma-separated tags
   --importance <level>   low, medium, high, critical
-mynow memory search <query> [flags]            # Search memories
+mynow memory update <id> <content> [flags]     # Update a memory (PUT /api/v1/customers/memories/{id})
+mynow memory search <query> [flags]            # Search memories (GET /api/v1/customers/memories/search)
   --category <cat>       Filter by category
   --tag <tag>            Filter by tag
-mynow memory delete <id>                       # Delete a memory
+mynow memory delete <id>                       # Delete a specific memory
+mynow memory delete-all [--force]              # Delete ALL memories (DELETE /api/v1/customers/memories)
+mynow memory export                            # Export memories to file (GET /api/v1/customers/memories/export)
+  --output <path>        Output file path (default: ./mynow-memories-<date>.json)
 ```
 
 ### 4.16 Household Commands
@@ -1225,6 +1368,46 @@ mynow memory delete <id>                       # Delete a memory
 mynow household                                # Show household info + members
 mynow household members                        # List members
 mynow household invite <email> [--role <role>]  # Invite a member
+mynow household leaderboard [--period <p>]     # Gamification leaderboard (WEEKLY default)
+mynow household challenges                     # List active household challenges
+```
+
+#### `mynow household leaderboard`
+
+Show the household gamification leaderboard.
+
+```
+mynow household leaderboard [flags]
+
+Flags:
+  --period <p>      WEEKLY | MONTHLY | ALL_TIME (default: WEEKLY)
+
+Output:
+  HOUSEHOLD LEADERBOARD — Taylor Family (This Week)
+
+  #1  John Doe     1,450 pts   🔥 12-day streak   8 tasks · 3 habits
+  #2  Alex Smith     920 pts   🔥 5-day streak    5 tasks · 2 habits
+  #3  Jordan Lee     340 pts   🔥 2-day streak    2 tasks · 1 habit
+
+API: GET /api/v1/gamification/households/{hid}/leaderboard?period=WEEKLY
+```
+
+#### `mynow household challenges`
+
+List active household challenges.
+
+```
+mynow household challenges
+
+Output:
+  HOUSEHOLD CHALLENGES — Taylor Family
+
+  🏆 Habit Streak Week          All members maintain 7+ day streak     3 days left
+     Progress: John ✓  Alex ✓  Jordan ✗
+  🏆 Team Task Sprint           Complete 30 tasks this week             5 days left
+     Progress: 12 / 30 tasks completed
+
+API: GET /api/v1/gamification/households/{hid}/challenges
 ```
 
 ### 4.17 Review Commands
@@ -1652,6 +1835,23 @@ Output:
   Morning meditation    45 days   🔥  (longest: 120)
   Daily task review     12 days   🔥  (longest: 23)
   Pomodoro sessions      8 days   🔥  (longest: 15)
+
+API: GET /api/v1/gamification/streaks
+```
+
+#### `mynow achievements points`
+
+Show total achievement points.
+
+```
+mynow achievements points
+
+Output:
+  ACHIEVEMENT POINTS
+  Total: 1,450 points across 12 achievements
+  Rank in household: #1 of 3 members
+
+API: GET /api/v1/gamification/points
 ```
 
 ---
@@ -2051,6 +2251,20 @@ Archive a conversation (soft-archive; shown with `--archived`).
 mynow ai conversations archive <id>
 ✓ Conversation archived.
 ```
+
+#### `mynow ai conversations favorite <id>`
+
+Mark a conversation as a favorite (pinned in the list).
+
+```
+mynow ai conversations favorite <id>
+✓ Conversation favorited.
+
+mynow ai conversations unfavorite <id>
+✓ Removed from favorites.
+```
+
+Both use `PATCH /api/v1/ai/conversations/{id}/status` with `{favorited: true/false}`.
 
 #### `mynow ai conversations delete <id>`
 
@@ -3550,24 +3764,37 @@ Complete mapping of CLI commands to MYN API endpoints.
 
 | Command | Method | Endpoint |
 |---------|--------|----------|
-| `task list` | GET | `/api/v2/unified-tasks` |
+| `task list` | GET | `/api/v2/unified-tasks` (params: `type`, `date`, `includeHousehold`, `isCompleted`, `page`, `size`, `sort`) |
+| `task list --archived` | GET | `/api/v2/unified-tasks/archived` |
 | `task show <id>` | GET | `/api/v2/unified-tasks/{id}` |
-| `task add` | POST | `/api/v2/unified-tasks` |
+| `task add` | POST | `/api/v2/unified-tasks` (client-generated UUID `id` required) |
 | `task edit <id>` | PATCH | `/api/v2/unified-tasks/{id}` |
 | `task done <id>` | POST | `/api/v2/unified-tasks/{id}/complete` |
+| `task uncomplete <id>` | POST | `/api/v2/unified-tasks/{id}/uncomplete` |
 | `task archive <id>` | POST | `/api/v2/unified-tasks/{id}/archive` |
-| `task move <id>` | PUT | `/api/v2/unified-tasks/{id}/project` |
-| `task snooze <id>` | PATCH | `/api/v2/unified-tasks/{id}` (update startDate) |
+| `task delete <id>` | DELETE | `/api/v2/unified-tasks/{id}` (soft-delete; recoverable) |
+| `task delete --permanent <id>` | DELETE | `/api/v2/unified-tasks/{id}/permanent` (irreversible) |
+| `task restore <id>` | POST | `/api/v2/unified-tasks/{id}/restore` |
+| `task move <id>` | PUT | `/api/project/{projectId}/moveTaskToProject/{taskId}` |
+| `task snooze <id>` | PATCH | `/api/v2/unified-tasks/{id}` (update `startDate`) |
+| `task batch` | PATCH | `/api/v2/unified-tasks/batch` (body: `{ids: [], updates: {}}`) |
 | `inbox list` | GET | `/api/v2/unified-tasks` (filter: no priority) |
 | `inbox add` | POST | `/api/v2/unified-tasks` |
 | `inbox count` | GET | `/api/v2/unified-tasks` (count: no priority) |
 | `habit list` | GET | `/api/v2/unified-tasks?type=HABIT` |
 | `habit done <id>` | POST | `/api/v2/unified-tasks/{id}/complete` |
-| `habit skip <id>` | POST | `/api/v1/habit-chains/{id}/skip` |
-| `habit streak <id>` | GET | `/api/v1/habit-chains/{id}/streaks` |
-| `habit chains` | GET | `/api/v1/habit-chains` |
-| `habit schedule` | GET | `/api/v1/habit-chains/schedule` |
+| `habit skip <id>` | POST | `/api/v2/unified-tasks/{id}/skip` |
+| `habit streak <id>` | GET | `/api/v2/unified-tasks/{id}/streak` |
+| `habit chains` | GET | `/api/habits/chains` |
+| `habit chains create` | POST | `/api/habits/chains` |
+| `habit chains add <cid> <hid>` | POST | `/api/habits/chains/{chainId}/habits` |
+| `habit chains remove <cid> <hid>` | DELETE | `/api/habits/chains/{chainId}/habits/{habitId}` |
+| `habit chains status <cid>` | GET | `/api/habits/chains/{chainId}/status` |
+| `habit chains done <cid>` | POST | `/api/habits/chains/{chainId}/batch-complete` |
+| `habit schedule` | POST | `/api/v2/scheduling/habits/schedule?numberOfDays=<n>` |
+| `habit schedule status` | GET | `/api/v2/scheduling/habits/status` |
 | `habit reminders` | GET | `/api/habits/reminders` |
+| `habit reminders smart-time <id>` | POST | `/api/habits/reminders/{habitId}/calculate-smart-time` |
 | `chore list` | GET | `/api/v2/chores` |
 | `chore done <id>` | POST | `/api/v2/chores/{id}/complete` |
 | `chore schedule` | GET | `/api/v2/chores/schedule` |
@@ -3576,11 +3803,13 @@ Complete mapping of CLI commands to MYN API endpoints.
 | `calendar delete <id>` | DELETE | `/api/v2/calendar/events/{id}` |
 | `calendar decline <id>` | POST | `/api/v2/calendar/meetings/{id}/decline` |
 | `calendar skip <id>` | POST | `/api/v2/calendar/meetings/{id}/skip` |
-| `compass` | GET | `/api/v2/compass/latest` |
-| `compass generate` | POST | `/api/v2/compass/generate` |
-| `compass correct` | POST | `/api/v2/compass/corrections` |
+| `compass` | GET | `/api/v2/compass/current` |
+| `compass generate` | POST | `/api/v2/compass/generate` (body: `{type: DAILY\|EVENING\|WEEKLY\|ON_DEMAND, sync: bool}`) |
+| `compass correct` | POST | `/api/v2/compass/corrections/apply` |
+| `compass correct --undo` | POST | `/api/v2/compass/corrections/undo` |
 | `compass complete` | POST | `/api/v2/compass/complete` |
 | `compass status` | GET | `/api/v2/compass/status` |
+| `compass history` | GET | `/api/v2/compass/history` |
 | `timer list` | GET | `/api/v2/timers` |
 | `timer start` | POST | `/api/v2/timers/countdown` |
 | `timer alarm` | POST | `/api/v2/timers/alarm` |
@@ -3601,23 +3830,30 @@ Complete mapping of CLI commands to MYN API endpoints.
 | `grocery add` | POST | `/api/v1/households/{hid}/grocery-list/items` |
 | `grocery add-bulk` | POST | `/api/v1/households/{hid}/grocery-list/items/bulk` |
 | `grocery check <id>` | PATCH | `/api/v1/households/{hid}/grocery-list/items/{id}` |
+| `grocery delete <id>` | DELETE | `/api/v1/households/{hid}/grocery-list/{id}` |
+| `grocery clear` | DELETE | `/api/v1/households/{hid}/grocery-list/checked` |
 | `grocery convert` | POST | `/api/v1/households/{hid}/grocery-list/convert-to-tasks` |
 | `project list` | GET | `/api/project` |
 | `project show <id>` | GET | `/api/project/{id}` |
-| `project create` | POST | `/api/project` |
+| `project create` | POST | `/api/project/create` |
 | `plan` | POST | `/api/schedules/plan` |
 | `schedule` | POST | `/api/schedules/auto` |
 | `reschedule` | POST | `/api/schedules/reschedule` |
-| `search` | POST | `/api/v2/search` |
+| `search` | GET | `/api/v2/search` (query params: `q`, `types[]`, `statuses[]`, `priorities[]`, `startDate`, `endDate`, `includeArchived`, `limit`, `offset`) |
 | `whoami` | GET | `/api/v1/customers/me` |
 | `goals` | GET | `/api/v1/customers/goals` |
 | `goals set` | PUT | `/api/v1/customers/goals` |
 | `prefs` | GET | `/api/v1/customers/preferences` |
 | `prefs set` | PUT | `/api/v1/customers/preferences` |
-| `memory list` | GET | `/api/v1/customers/memories` |
+| `prefs coaching` | GET | `/api/v1/customers/coaching-intensity` |
+| `prefs coaching <level>` | PUT | `/api/v1/customers/coaching-intensity` (body: `{intensity: OFF\|GENTLE\|PROACTIVE}`) |
+| `memory list` | GET | `/api/v1/customers/memories` (returns all; no paginated GET by ID) |
 | `memory add` | POST | `/api/v1/customers/memories` |
+| `memory update <id>` | PUT | `/api/v1/customers/memories/{id}` |
 | `memory search` | GET | `/api/v1/customers/memories/search` |
 | `memory delete <id>` | DELETE | `/api/v1/customers/memories/{id}` |
+| `memory delete-all` | DELETE | `/api/v1/customers/memories` |
+| `memory export` | GET | `/api/v1/customers/memories/export` |
 | `household` | GET | `/api/v1/customers/me` (extract households) |
 | `household members` | GET | `/api/v1/households/{hid}/members` |
 | `household invite` | POST | `/api/v1/households/{hid}/invites` |
@@ -3640,11 +3876,15 @@ Complete mapping of CLI commands to MYN API endpoints.
 | `notifications read <id>` | POST | `/api/v2/notifications/mark-read` |
 | `notifications read-all` | POST | `/api/v2/notifications/mark-read` (markAll=true) |
 | `notifications delete <id>` | DELETE | `/api/v2/notifications/{id}` |
-| `stats` | GET | `/api/v1/gamification/streaks` (+ pomodoro/stats) |
+| `stats` | GET | multiple: `/api/v1/gamification/streaks` + `/api/v1/pomodoro/stats` + `/api/v1/usage/today` |
 | `stats pomodoro` | GET | `/api/v1/pomodoro/stats` |
-| `stats usage` | GET | `/api/v1/token-usage/my-usage` |
-| `achievements` | GET | `/api/v1/gamification/achievements` |
+| `stats usage` | GET | `/api/v1/token-usage/my-usage` (params: `startDate`, `endDate`) |
+| `achievements` | GET | `/api/v1/gamification/achievements` (unlocked) |
+| `achievements --available` | GET | `/api/v1/gamification/achievements/available` (locked, with progress) |
 | `achievements streaks` | GET | `/api/v1/gamification/streaks` |
+| `achievements points` | GET | `/api/v1/gamification/points` |
+| `achievements challenges` | GET | `/api/v1/gamification/households/{hid}/challenges` |
+| `household leaderboard` | GET | `/api/v1/gamification/households/{hid}/leaderboard` (param: `period=WEEKLY`) |
 | `export` | POST | `/api/v1/customers/request-export` |
 | `export list` | GET | `/api/v1/customers/exports` |
 | `export download <id>` | GET | `/api/v1/customers/exports/{id}/download` |
@@ -3665,8 +3905,9 @@ Complete mapping of CLI commands to MYN API endpoints.
 | `ai conversations` | GET | `/api/v1/ai/conversations` |
 | `ai conversations show <id>` | GET | `/api/v1/ai/conversations/{id}/messages` |
 | `ai conversations search <q>` | GET | `/api/v1/ai/conversations/search` |
-| `ai conversations count` | GET | `/api/v1/ai/conversations/count` |
-| `ai conversations archive <id>` | PATCH | `/api/v1/ai/conversations/{id}/status` |
+| `ai conversations count` | GET | `/api/v1/ai/conversations/stats` (returns `totalConversations`, `webConversations`, `voiceConversations`) |
+| `ai conversations archive <id>` | PATCH | `/api/v1/ai/conversations/{id}/status` (body: `{isArchived: true}`) |
+| `ai conversations favorite <id>` | PATCH | `/api/v1/ai/conversations/{id}/status` (body: `{favorited: true}`) |
 | `ai conversations delete <id>` | DELETE | `/api/v1/ai/conversations/{id}` |
 | `ai conversations continue <id>` | POST | `/api/v1/ai/conversations/{id}/continue` |
 
@@ -3682,6 +3923,11 @@ MYN uses a 4-zone priority system:
 | Opportunity Now | `OPPORTUNITY_NOW` | `--priority opportunity` | `o` | `○` | Yellow |
 | Over The Horizon | `OVER_THE_HORIZON` | `--priority horizon` | `h` | `◌` | Blue |
 | Parking Lot | `PARKING_LOT` | `--priority parking` | `x` | `·` | Gray |
+| Inbox | `null` | (no `--priority`) | — | `?` | White |
+
+**Inbox zone**: Tasks with `priority: null` are considered "inbox" items (unprocessed). The API has no
+explicit `INBOX` priority constant — a null priority means the item hasn't been assigned yet.
+The `inbox list` command filters for `priority == null` client-side after fetching all tasks.
 
 ---
 
@@ -3904,7 +4150,7 @@ internal/
   api/
     client.go               Base HTTP, auth injection, retry, SSE streaming
     tasks.go                /api/v2/unified-tasks
-    habits.go               /api/v1/habit-chains
+    habits.go               /api/habits/chains, /api/habits/reminders, /api/v2/scheduling/habits
     chores.go               /api/v2/chores
     compass.go              /api/v2/compass
     calendar.go             /api/v2/calendar
@@ -4020,4 +4266,225 @@ test/
     apikeys_test.go
     ai_test.go            AI chat + conversation history
     cli_output_test.go    JSON, quiet, no-color output modes
+```
+
+---
+
+## Appendix I: Key Request / Response Structures
+
+Reference for implementors. Field names are exact as used by the backend.
+
+### I.1 UnifiedTask (create / update)
+
+**POST `/api/v2/unified-tasks`** — client must generate the UUID `id` field.
+
+```json
+{
+  "id": "<client-generated-uuid>",
+  "title": "Prepare quarterly report",
+  "taskType": "TASK",
+  "priority": "CRITICAL",
+  "startDate": "2026-03-09",
+  "dueDate": null,
+  "duration": 120,
+  "description": "Q1 financials and projections",
+  "recurrenceRule": null,
+  "isAutoScheduled": false,
+  "householdId": null
+}
+```
+
+**PATCH `/api/v2/unified-tasks/{id}`** — all fields optional:
+
+```json
+{
+  "title": "Updated title",
+  "priority": "OPPORTUNITY_NOW",
+  "startDate": "2026-03-10",
+  "duration": 60
+}
+```
+
+**Response DTO fields** (key ones):
+
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "title": "Prepare quarterly report",
+  "description": "Q1 financials...",
+  "taskType": "TASK",
+  "priority": "CRITICAL",
+  "startDate": "2026-03-09",
+  "dueDate": null,
+  "duration": 120,
+  "isCompleted": false,
+  "isArchived": false,
+  "recurrenceRule": null,
+  "createdDate": "2026-03-01T08:00:00",
+  "lastUpdated": "2026-03-09T09:15:00",
+  "streakCount": null,
+  "commentCount": 2,
+  "schedules": [],
+  "calendarEvents": []
+}
+```
+
+### I.2 Unified Task Query Parameters
+
+`GET /api/v2/unified-tasks`
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `type` | string | `TASK` \| `HABIT` \| `CHORE` \| `RECURRING_TASK` |
+| `isCompleted` | boolean | Filter by completion state |
+| `includeHousehold` | boolean | Include household shared tasks |
+| `page` | int | 0-indexed page (default: 0) |
+| `size` | int | Page size (default: 50, max: 200) |
+| `sort` | string | e.g. `createdDate,desc` or `title,asc` |
+
+**Inbox filter**: `priority == null` — filter client-side after fetching all tasks, or fetch with no priority filter and check for null `priority` in the response.
+
+### I.3 OAuth Token Request/Response
+
+**POST `/api/mcp/oauth/token`** — authorization code exchange:
+
+```
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=authorization_code
+&code=<authorization_code>
+&redirect_uri=http://localhost:PORT/callback
+&code_verifier=<pkce_verifier>
+&client_id=<mcp_xxxxxxxxxxxxxxxx>
+```
+
+**Response:**
+
+```json
+{
+  "access_token": "eyJ...",
+  "token_type": "Bearer",
+  "expires_in": 3600,
+  "refresh_token": "rt_...",
+  "scope": "mcp"
+}
+```
+
+**Refresh:**
+
+```
+grant_type=refresh_token
+&refresh_token=<refresh_token>
+```
+
+### I.4 AI Chat Request
+
+**POST `/api/ai/chat/stream`** (SSE streaming):
+
+```json
+{
+  "currentMessage": "How should I prioritize today?",
+  "conversationId": "optional-existing-conversation-id",
+  "isMobile": false,
+  "isVoice": false
+}
+```
+
+Response: `text/event-stream` — each `data:` line contains a text chunk. End signaled by `[DONE]`.
+
+### I.5 ConversationDTO
+
+```json
+{
+  "conversationId": "uuid",
+  "customerId": "uuid",
+  "title": "Task prioritization",
+  "createdAt": "2026-03-09T08:30:00",
+  "updatedAt": "2026-03-09T09:15:00",
+  "messageCount": 3,
+  "isVoice": false,
+  "lastMessageAt": "2026-03-09T09:15:00",
+  "lastMessagePreview": "Based on your schedule, I'd suggest...",
+  "topics": ["prioritization", "planning"],
+  "isArchived": false,
+  "isDeleted": false,
+  "favorited": false
+}
+```
+
+### I.6 Batch Task Update
+
+**PATCH `/api/v2/unified-tasks/batch`**:
+
+```json
+{
+  "ids": ["uuid-1", "uuid-2", "uuid-3"],
+  "updates": {
+    "priority": "OPPORTUNITY_NOW",
+    "startDate": "2026-03-10"
+  }
+}
+```
+
+Response: array of updated `UnifiedTaskDTO` objects.
+
+### I.7 Pomodoro Smart-Start Response
+
+**POST `/api/v1/pomodoro/smart-start`** — task suggestions:
+
+```json
+{
+  "availableMinutes": 85,
+  "suggestions": [
+    {
+      "task": { "id": "...", "title": "Prepare quarterly report", "priority": "CRITICAL" },
+      "reason": "Most critical, fits window",
+      "estimatedMinutes": 120,
+      "confidence": "HIGH"
+    }
+  ],
+  "session": {
+    "id": "...",
+    "status": "RUNNING",
+    "phase": "WORK",
+    "sessionNumber": 1,
+    "remainingSeconds": 1500
+  }
+}
+```
+
+### I.8 Compass Generate Request/Response
+
+**POST `/api/v2/compass/generate`**:
+
+```json
+{
+  "type": "ON_DEMAND",
+  "sync": true
+}
+```
+
+Types: `DAILY` | `EVENING` | `WEEKLY` | `WEEKLY_AND_DAILY` | `ON_DEMAND` (max 3/day)
+
+Response (sync, HTTP 200): Compass summary object.
+Response (async, HTTP 202): `{ "jobId": "...", "message": "Briefing queued" }`.
+
+### I.9 Chore Rotation Status Response
+
+**GET `/api/v2/unified-tasks/{id}/rotation/status`**:
+
+```json
+{
+  "choreId": "uuid",
+  "choreTitle": "Take out trash",
+  "currentAssigneeId": "member-uuid",
+  "currentAssigneeName": "Alex",
+  "nextAssigneeName": "Jordan",
+  "rotationOrder": ["Alex", "Jordan", "Riley"],
+  "currentPosition": 0,
+  "lastRotated": "2026-03-07T00:00:00",
+  "totalRotations": 15,
+  "status": "ACTIVE",
+  "rotationType": "ROUND_ROBIN"
+}
 ```

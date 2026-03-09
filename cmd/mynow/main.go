@@ -136,33 +136,6 @@ func newNowCmd(a *app.App) *cobra.Command {
 	return cmd
 }
 
-func newTaskCmd(a *app.App) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "task",
-		Short: "Manage tasks",
-	}
-
-	cmd.AddCommand(&cobra.Command{
-		Use:   "done [id]",
-		Short: "Mark a task as done",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return a.TaskDone(args[0])
-		},
-	})
-
-	cmd.AddCommand(&cobra.Command{
-		Use:   "snooze [id]",
-		Short: "Snooze a task",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return a.TaskSnooze(args[0])
-		},
-	})
-
-	return cmd
-}
-
 func newReviewCmd(a *app.App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "review",

@@ -67,15 +67,6 @@ func (a *App) NowFocus() error {
 	return ErrNotImplemented
 }
 
-// TaskDone marks a task as done.
-func (a *App) TaskDone(id string) error {
-	return ErrNotImplemented
-}
-
-// TaskSnooze snoozes a task.
-func (a *App) TaskSnooze(id string) error {
-	return ErrNotImplemented
-}
 
 // ReviewDaily runs the daily review.
 func (a *App) ReviewDaily() error {

@@ -1,0 +1,50 @@
+version: 2
+
+project_name: mynow
+
+builds:
+  - id: mynow
+    binary: mynow
+    main: ./cmd/mynow
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.ShortCommit}}
+      - -X main.date={{.Date}}
+
+archives:
+  - id: default
+    format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+nfpms:
+  - id: packages
+    package_name: mynow
+    vendor: Mind Your Now
+    homepage: https://github.com/mindyournow/myn-cli
+    maintainer: Mind Your Now <oss@mindyournow.com>
+    description: "Fast, scriptable, Linux-native CLI & TUI for Mind Your Now"
+    license: MIT
+    formats:
+      - deb
+      - rpm
+      - apk
+      - archlinux
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"

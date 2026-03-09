@@ -1,0 +1,29 @@
+name: Integration Tests
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * 1" # Weekly on Monday at 6 AM UTC
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+
+      - name: Clone MYN backend
+        uses: actions/checkout@v4
+        with:
+          repository: eltmon/mind-your-now-backend
+          path: myn-backend
+          token: ${{ secrets.MYN_BACKEND_TOKEN }}
+
+      - name: Run integration tests
+        env:
+          MYN_INTEGRATION_TEST: "1"
+          MYN_BACKEND_PATH: ${{ github.workspace }}/myn-backend
+        run: make test-integration

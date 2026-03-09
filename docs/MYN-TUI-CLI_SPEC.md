@@ -1769,7 +1769,7 @@ Output:
 ### 4.23 Notification Commands
 
 Manage in-app notifications (comments, shares, household events, AI messages, timer completions).
-Two versions of the API exist (v1 and v2); the CLI uses v2 for full history with read/actioned state.
+All notification endpoints are at `/api/v1/notifications`.
 
 #### `mynow notifications`
 
@@ -4079,7 +4079,8 @@ Complete mapping of CLI commands to MYN API endpoints.
 | `apikey revoke <id>` | DELETE | `/api/v1/api-keys/{id}` |
 | `ai chat` | POST | `/api/ai/chat/stream` (SSE streaming) |
 | `ai conversations` | GET | `/api/v1/ai/conversations` |
-| `ai conversations show <id>` | GET | `/api/v1/ai/conversations/{id}/messages` |
+| `ai conversations create` | POST | `/api/v1/ai/conversations` (body: `{title, isVoice, voiceSessionId}`) |
+| `ai conversations show <id>` | GET | `/api/v1/ai/conversations/{id}` (metadata) or `/{id}/messages` (full messages) |
 | `ai conversations search <q>` | GET | `/api/v1/ai/conversations/search` |
 | `ai conversations count` | GET | `/api/v1/ai/conversations/stats` (returns `totalConversations`, `webConversations`, `voiceConversations`) |
 | `ai conversations archive <id>` | PATCH | `/api/v1/ai/conversations/{id}/status` (body: `{isArchived: true}`) |
@@ -4594,9 +4595,19 @@ grant_type=refresh_token
   "currentMessage": "How should I prioritize today?",
   "conversationId": "optional-existing-conversation-id",
   "isMobile": false,
-  "isVoice": false
+  "isVoice": false,
+  "voiceSessionId": null,
+  "context": null,
+  "additionalSystemContext": null,
+  "regenerate": false
 }
 ```
+
+Required: `currentMessage`. All other fields optional.
+- `voiceSessionId` — links to a voice session (used with `isVoice: true`)
+- `context` — specialized conversation context (MIN-447)
+- `additionalSystemContext` — additional system prompt injection (MIN-711)
+- `regenerate` — set true to regenerate the last AI response (MIN-711)
 
 Response: `text/event-stream` — each `data:` line contains a text chunk. End signaled by `[DONE]`.
 

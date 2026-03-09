@@ -270,12 +270,28 @@ applied, and any remaining known gaps.
 
 ---
 
-## Not Yet Verified
+### ✅ ConversationController.java + AIStreamingController.java
+**Path:** `/api/v1/ai/conversations`, `/api/ai`
+**Verified in commit:** `<pass6>`
+**All 8 conversation management endpoints confirmed correct.** Chat streaming at `/api/ai/chat/stream` confirmed.
 
-| Controller | Priority | Notes |
-|------------|----------|-------|
-| ConversationController.java | Medium | AI conversations |
-| AIStreamingController.java | Medium | AI chat stream |
+**Additional undocumented endpoints** (web/frontend-only, not needed in CLI):
+- `POST /api/v1/ai/conversations` — create conversation (added to Appendix A)
+- `PATCH /api/v1/ai/conversations/{id}` — update title (web only)
+- `GET /api/v1/ai/conversations/{id}` — get single conversation (added to Appendix A)
+- `POST /api/v1/ai/conversations/{id}/embed` — RAG embedding (internal, MIN-454)
+- `POST /api/ai/voice/stream` — voice streaming (mobile/web only)
+- `GET /api/ai/stream/health` — health check (internal)
+
+**AIChatMessage DTO extra optional fields** (added to Appendix I.4):
+- `voiceSessionId` — links to voice session
+- `context` — specialized conversation context (MIN-447)
+- `additionalSystemContext` — additional system prompt (MIN-711)
+- `regenerate` — regenerate last response (MIN-711)
+
+---
+
+## Not Yet Verified
 | GamificationController.java | Low | Verified manually in pass 3 |
 | HouseholdController.java + HouseholdInviteController.java | Low | Verified in passes 2-4 |
 | ProjectController.java | Low | Verified in pass 3 |

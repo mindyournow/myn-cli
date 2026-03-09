@@ -995,15 +995,20 @@ Output:
 mynow timer start <duration> [flags]
 
 Flags:
-  --label <text>          Timer label
-  --type <type>           countdown (default), pomodoro
+  --label <text>          Timer label (maps to `name` field in request body)
+  --task <id>             Link to a task (sourceTaskId)
+  --habit <id>            Link to a habit (sourceHabitId)
+  --sound <name>          Completion sound: default|bell|chime|gong|ding|alarm|urgent|none
 
-Duration formats: 25m, 1h, 1h30m, 90s
+Duration formats: 25m, 1h, 1h30m, 90s (converted to `durationSeconds` in request body)
 
 Examples:
   mynow timer start 25m                           # 25-minute countdown
   mynow timer start 25m --label "Focus time"
+  mynow timer start 30m --task abc123             # link to a task
 ```
+
+API body fields: `name` (from `--label`), `durationSeconds` (converted from duration arg), `sourceTaskId`, `sourceHabitId`, `completionSound`
 
 #### `mynow timer pomodoro`
 
@@ -1034,12 +1039,18 @@ mynow timer alarm <time> [flags]
 
 Flags:
   --label <text>          Alarm label
-  --recurrence <rule>     RRULE for repeating alarms
+  --task <id>             Link to a task (sourceTaskId in backend)
+  --habit <id>            Link to a habit (sourceHabitId in backend)
+  --sound <name>          Completion sound: default|bell|chime|gong|ding|alarm|urgent|none
 
 Examples:
   mynow timer alarm 07:00 --label "Wake up"
-  mynow timer alarm 08:30 --label "Standup" --recurrence "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR"
+  mynow timer alarm 08:30 --label "Standup"
 ```
+
+> **Note:** The `--recurrence` flag for repeating alarms is **not yet implemented** in the backend (`CreateAlarmTimerRequest` has no recurrence field). It is planned for a future release.
+
+API body fields: `name` (mapped from `--label`), `alarmTime` (ZonedDateTime), `sourceTaskId`, `sourceHabitId`, `completionSound`
 
 #### `mynow timer cancel <id>`
 
@@ -1389,41 +1400,65 @@ API: `GET /api/v1/customers/coaching-intensity` / `PUT /api/v1/customers/coachin
 
 #### `mynow prefs notifications`
 
-Get or set notification preferences (push alerts, sound, quiet hours, per-type toggles).
+Get or set notification preferences (per-type toggles and quiet hours).
 
 ```
 mynow prefs notifications                      # Show notification preferences
 mynow prefs notifications set <key> <value>    # Set a notification preference
 ```
 
+Available preference fields:
+- `taskRemindersEnabled` (bool, default: true)
+- `habitRemindersEnabled` (bool, default: true)
+- `choreRemindersEnabled` (bool, default: true)
+- `timerAlertsEnabled` (bool, default: true)
+- `aiNudgesEnabled` (bool, default: false)
+- `quietHoursEnabled` (bool, default: false)
+- `quietHoursStart` (time HH:MM, default: 22:00)
+- `quietHoursEnd` (time HH:MM, default: 07:00)
+- `bypassQuietForUrgent` (bool, default: true)
+
 API: `GET /api/v1/customers/notification-preferences` / `PUT /api/v1/customers/notification-preferences`
 
 #### `mynow prefs timers`
 
-Get or set timer preferences (default work duration, break durations, auto-start, sound).
+Get or set timer preferences (default snooze, auto-dismiss, floating widget, sound, haptics).
 
 ```
 mynow prefs timers                             # Show timer preferences
 mynow prefs timers set <key> <value>           # Set a timer preference
 ```
 
-API: `GET /api/v2/customers/me/timer-preferences` / `PUT /api/v2/customers/me/timer-preferences`
+Available preference fields: `completionSound` (default|alarm|bell|chime|silent), `defaultSnoozeMinutes` (1-60), `autoDismissEnabled` (bool), `autoDismissDelaySeconds` (0-300), `showFloatingWidget` (bool), `hapticEnabled` (bool)
+
+> **Note:** Sound options for timer preferences are limited to 5 values: `default|alarm|bell|chime|silent`. This is narrower than the 8 sound options for per-timer creation (`gong`, `ding`, `urgent`, `none` are not valid preference values).
+
+API: `GET /api/v2/customers/me/timer-preferences` / `PATCH /api/v2/customers/me/timer-preferences` (uses PATCH)
 
 #### `mynow account mcp-sessions`
 
-List connected AI assistant sessions (e.g. Claude, Cursor, Codex) using MCP OAuth tokens.
+List and manage connected AI assistant sessions (e.g. Claude, Cursor, Codex) using MCP OAuth tokens.
 
 ```
-mynow account mcp-sessions
+mynow account mcp-sessions                    # List active sessions
+mynow account mcp-sessions revoke <id>        # Revoke a specific session
+mynow account mcp-sessions revoke-all         # Revoke all sessions
+mynow account mcp-sessions count              # Show active session count
 
-Output:
+Output (list):
   MCP SESSIONS (2 active)
-  ID          Client         Scope   Connected
-  sess_abc123  claude-code   mcp     Mar 9, 2026
-  sess_def456  cursor        mcp     Mar 7, 2026
+  ID   Client        Scope  Connected      Last used    Expires
+  12   claude-code   mcp    Mar 9, 2026    2h ago       Mar 9, 2027
+  13   cursor        mcp    Mar 7, 2026    yesterday    Mar 7, 2027
 ```
 
-API: `GET /api/v1/customers/mcp-sessions`
+Response fields: `id`, `clientId`, `clientName`, `tokenType`, `scope`, `createdAt`, `expiresAt`, `lastUsedAt`, `active`
+
+API:
+- `GET /api/v1/customers/mcp-sessions` — list
+- `DELETE /api/v1/customers/mcp-sessions/{id}` — revoke single
+- `DELETE /api/v1/customers/mcp-sessions` — revoke all
+- `GET /api/v1/customers/mcp-sessions/count` — count
 
 ### 4.15 Memory Commands
 
@@ -3902,7 +3937,7 @@ Complete mapping of CLI commands to MYN API endpoints.
 | `task list --archived` | GET | `/api/v2/unified-tasks/archived` |
 | `task show <id>` | GET | `/api/v2/unified-tasks/{id}` |
 | `task add` | POST | `/api/v2/unified-tasks` (client-generated UUID `id` required) |
-| `task edit <id>` | PATCH | `/api/v2/unified-tasks/{id}` |
+| `task edit <id>` | PUT or PATCH | `/api/v2/unified-tasks/{id}` (both methods accepted per MIN-169) |
 | `task done <id>` | POST | `/api/v2/unified-tasks/{id}/complete` |
 | `task uncomplete <id>` | POST | `/api/v2/unified-tasks/{id}/uncomplete` |
 | `task archive <id>` | POST | `/api/v2/unified-tasks/{id}/archive` |
@@ -4012,11 +4047,11 @@ Complete mapping of CLI commands to MYN API endpoints.
 | `chore rotation advance <id>` | POST | `/api/v2/unified-tasks/{id}/rotation/advance` |
 | `chore rotation reset <id>` | POST | `/api/v2/unified-tasks/{id}/rotation/reset` |
 | `chore rotation order <id>` | PUT | `/api/v2/unified-tasks/{id}/rotation/order` |
-| `notifications` | GET | `/api/v2/notifications` |
-| `notifications unread` | GET | `/api/v2/notifications/unread` |
-| `notifications read <id>` | POST | `/api/v2/notifications/mark-read` (body: `{notificationIds: ["<id>"], markAll: false}`) |
-| `notifications read-all` | POST | `/api/v2/notifications/mark-read` (body: `{notificationIds: [], markAll: true}`) |
-| `notifications delete <id>` | DELETE | `/api/v2/notifications/{id}` |
+| `notifications` | GET | `/api/v1/notifications` (params: `page`, `size`) |
+| `notifications unread` | GET | `/api/v1/notifications/unread-count` |
+| `notifications read <id>` | PUT | `/api/v1/notifications/{id}/read` (no body) |
+| `notifications read-all` | PUT | `/api/v1/notifications/read-all` (no body) |
+| `notifications delete <id>` | DELETE | `/api/v1/notifications/{id}` |
 | `stats` | GET | multiple: `/api/v1/gamification/streaks` + `/api/v1/pomodoro/stats` + `/api/v1/usage/today` |
 | `stats pomodoro` | GET | `/api/v1/pomodoro/stats` |
 | `stats usage` | GET | `/api/v1/token-usage/my-usage` (params: `startDate`, `endDate`) |
@@ -4054,11 +4089,24 @@ Complete mapping of CLI commands to MYN API endpoints.
 | `prefs notifications` | GET | `/api/v1/customers/notification-preferences` |
 | `prefs notifications set` | PUT | `/api/v1/customers/notification-preferences` |
 | `prefs timers` | GET | `/api/v2/customers/me/timer-preferences` |
-| `prefs timers set` | PUT | `/api/v2/customers/me/timer-preferences` |
+| `prefs timers set` | PATCH | `/api/v2/customers/me/timer-preferences` (PATCH, not PUT) |
 | `account mcp-sessions` | GET | `/api/v1/customers/mcp-sessions` |
 | `export delete-batch` | POST | `/api/v1/customers/exports/delete-batch` (body: `{exportIds: [...]}`) |
 | `timer pomodoro suggest` | GET | `/api/v1/pomodoro/suggestions` (params: `availableMinutes`, `maxSuggestions`) |
 | `timer pomodoro interrupt` | PUT | `/api/v1/pomodoro/sessions/{sessionId}` (body: `{interruptReason: "..."}`) |
+| `timer pomodoro sessions` | GET | `/api/v1/pomodoro/sessions` (paginated; params: status, sessionType, taskId, startDate, endDate) |
+| `timer pomodoro sessions <id>` | GET | `/api/v1/pomodoro/sessions/{sessionId}` |
+| `timer get <id>` | GET | `/api/v2/timers/{id}` |
+| `calendar show <id>` | GET | `/api/v2/calendar/events/{id}` |
+| `calendar completion-prefs` | GET | `/api/v2/calendar/completion-preferences` |
+| `calendar completion-prefs set` | PUT | `/api/v2/calendar/completion-preferences` |
+| `calendar meetings skipped` | GET | `/api/v2/calendar/meetings/skipped` |
+| `calendar unskip <id>` | DELETE | `/api/v2/calendar/meetings/skip/{meetingId}` |
+| `habit schedule status` | GET | `/api/v2/scheduling/habits/status` |
+| `chore schedule-assign <id>` | PUT | `/api/v2/chores/{choreId}/schedule` |
+| `account mcp-sessions revoke <id>` | DELETE | `/api/v1/customers/mcp-sessions/{id}` |
+| `account mcp-sessions revoke-all` | DELETE | `/api/v1/customers/mcp-sessions` |
+| `account mcp-sessions count` | GET | `/api/v1/customers/mcp-sessions/count` |
 | `account delete confirm` | POST | `/api/v1/account-deletion/confirm?token=<TOKEN>` (public; called via email link) |
 
 ---
@@ -4426,34 +4474,44 @@ Reference for implementors. Field names are exact as used by the backend.
 
 ### I.1 UnifiedTask (create / update)
 
-**POST `/api/v2/unified-tasks`** — client must generate the UUID `id` field.
+**POST `/api/v2/unified-tasks`** — client must generate the UUID `id` field. `taskType` is not declared in `CreateTaskRequest` (defaults to TASK server-side); use the `type` query param on GET to filter by type.
 
 ```json
 {
   "id": "<client-generated-uuid>",
   "title": "Prepare quarterly report",
-  "taskType": "TASK",
   "priority": "CRITICAL",
   "startDate": "2026-03-09",
   "dueDate": null,
   "duration": 120,
-  "description": "Q1 financials and projections",
+  "notes": "Q1 financials and projections",
   "recurrenceRule": null,
   "isAutoScheduled": false,
-  "householdId": null
+  "category": null,
+  "quantity": null,
+  "projectId": null,
+  "calendarId": null
 }
 ```
 
-**PATCH `/api/v2/unified-tasks/{id}`** — all fields optional:
+Additional optional create fields: `isLocked`, `isSlidingWindow`, `allowSplitChunks`, `minChunkDuration`, `schedules` (List of schedule block IDs).
+
+> **Note:** The field is `notes` (not `description`) in `CreateTaskRequest`. The response DTO maps both `notes` and `description` to the same value.
+
+**PUT or PATCH `/api/v2/unified-tasks/{id}`** — both HTTP methods accepted (MIN-169). All fields optional:
 
 ```json
 {
   "title": "Updated title",
   "priority": "OPPORTUNITY_NOW",
   "startDate": "2026-03-10",
-  "duration": 60
+  "duration": 60,
+  "notes": "updated notes",
+  "projectId": "proj-uuid"
 }
 ```
+
+Additional update-only fields: `completedDate`, `schedulingState`, `schedulingReason`.
 
 **Response DTO fields** (key ones):
 

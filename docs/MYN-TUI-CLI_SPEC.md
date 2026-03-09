@@ -70,7 +70,7 @@ internal/
     pomodoro.go     Pomodoro start/smart-start/pause/resume/stop/complete/history/settings
     lists.go        Grocery CRUD, bulk add, check, clear, convert
     projects.go     Project CRUD, move tasks
-    planning.go     AI plan, auto-schedule, reschedule
+    planning.go     AI plan (via Kaia chat), client-side auto-schedule, reschedule
     search.go       Unified search
     profile.go      Whoami, goals, prefs, coaching intensity
     memory.go       Memory CRUD, search, export
@@ -95,7 +95,7 @@ internal/
     pomodoro.go     /api/v1/pomodoro
     lists.go        /api/v1/households/.../grocery-list
     projects.go     /api/project
-    planning.go     /api/schedules
+    planning.go     /api/v2/unified-tasks (client-side scheduling) + /api/ai/chat/stream (AI plan)
     search.go       /api/v2/search
     profile.go      /api/v1/customers
     memory.go       /api/v1/customers/memories
@@ -204,7 +204,7 @@ mynow login --api-key
   API key stored in keyring.
 ```
 
-- Validates key via `GET /api/v1/customers/me` (key in `X-API-KEY` header)
+- Validates key via `GET /api/v1/customers` (key in `X-API-KEY` header)
 - Stores in Linux Secret Service under service=`mynow`, account=`api-key`
 - All subsequent requests use `X-API-KEY: myn_...` header (not `Authorization: Bearer`)
 
@@ -1053,6 +1053,44 @@ mynow timer cancel <id>
 mynow timer snooze <id> [--minutes <n>]    # default: 5
 ```
 
+#### `mynow timer pause <id>`
+
+```
+mynow timer pause <id>
+```
+
+#### `mynow timer resume <id>`
+
+```
+mynow timer resume <id>
+```
+
+#### `mynow timer complete <id>`
+
+Mark a timer as completed (without it naturally expiring).
+
+```
+mynow timer complete <id>
+```
+
+#### `mynow timer dismiss`
+
+Dismiss all completed timers.
+
+```
+mynow timer dismiss
+✓ All completed timers dismissed.
+```
+
+#### `mynow timer count`
+
+Show active timer count.
+
+```
+mynow timer count
+Active timers: 2
+```
+
 ### 4.10 Grocery List Commands
 
 #### `mynow grocery`
@@ -1195,9 +1233,11 @@ Flags:
 
 ### 4.12 Planning Commands
 
+> **Backend status**: The MYN backend's `/api/schedules` endpoints are for schedule block CRUD (named time windows, e.g. "Morning Focus 9–11 AM"). There are no backend endpoints for AI-powered planning or auto-scheduling at this time. The `plan`, `schedule`, and `reschedule` commands below represent **planned CLI features** that will either: (a) use a future AI planning endpoint when the backend adds it, or (b) perform client-side scheduling using the task list + calendar events fetched locally.
+
 #### `mynow plan`
 
-Generate an AI plan for a goal.
+Generate an AI plan for a goal. Fetches open tasks and current calendar, then uses the Kaia AI chat endpoint to produce an ordered task plan.
 
 ```
 mynow plan <goal> [flags]
@@ -1211,9 +1251,11 @@ Examples:
   mynow plan "Complete Q1 planning" --hours 4 --deadline 2026-03-15
 ```
 
+*Implementation note: Sends a structured prompt via `POST /api/ai/chat/stream` with the goal and current task/calendar context.*
+
 #### `mynow schedule`
 
-Auto-schedule today's tasks.
+Auto-schedule today's tasks into available calendar slots. Client-side algorithm: fetch tasks + calendar events, fill free time slots with CRITICAL-first ordering.
 
 ```
 mynow schedule [flags]
@@ -1233,6 +1275,8 @@ Output:
   ◌ Research new frameworks    (moved to tomorrow)
 ```
 
+*Implementation note: Reads tasks via `GET /api/v2/unified-tasks` and calendar via `GET /api/v2/calendar/events`; writes updated scheduledDate back via `PUT /api/v2/unified-tasks/{id}`.*
+
 #### `mynow reschedule`
 
 Reschedule tasks to a different date.
@@ -1248,6 +1292,8 @@ Flags:
 Examples:
   mynow reschedule abc123 def456 --date friday --reason "Meeting overran"
 ```
+
+*Implementation note: Updates each task via `PUT /api/v2/unified-tasks/{id}` with the new `scheduledDate`.*
 
 ### 4.13 Search Command
 
@@ -1340,6 +1386,44 @@ Examples:
 ```
 
 API: `GET /api/v1/customers/coaching-intensity` / `PUT /api/v1/customers/coaching-intensity`
+
+#### `mynow prefs notifications`
+
+Get or set notification preferences (push alerts, sound, quiet hours, per-type toggles).
+
+```
+mynow prefs notifications                      # Show notification preferences
+mynow prefs notifications set <key> <value>    # Set a notification preference
+```
+
+API: `GET /api/v1/customers/notification-preferences` / `PUT /api/v1/customers/notification-preferences`
+
+#### `mynow prefs timers`
+
+Get or set timer preferences (default work duration, break durations, auto-start, sound).
+
+```
+mynow prefs timers                             # Show timer preferences
+mynow prefs timers set <key> <value>           # Set a timer preference
+```
+
+API: `GET /api/v2/customers/me/timer-preferences` / `PUT /api/v2/customers/me/timer-preferences`
+
+#### `mynow account mcp-sessions`
+
+List connected AI assistant sessions (e.g. Claude, Cursor, Codex) using MCP OAuth tokens.
+
+```
+mynow account mcp-sessions
+
+Output:
+  MCP SESSIONS (2 active)
+  ID          Client         Scope   Connected
+  sess_abc123  claude-code   mcp     Mar 9, 2026
+  sess_def456  cursor        mcp     Mar 7, 2026
+```
+
+API: `GET /api/v1/customers/mcp-sessions`
 
 ### 4.15 Memory Commands
 
@@ -1929,6 +2013,20 @@ mynow export delete <id> [--force]
 ✓ Export exp-abc123 deleted.
 ```
 
+#### `mynow export delete-batch`
+
+Delete multiple export jobs at once.
+
+```
+mynow export delete-batch <id...> [--force]
+
+Examples:
+  mynow export delete-batch exp-abc123 exp-def456
+✓ 2 exports deleted.
+```
+
+API: `POST /api/v1/customers/exports/delete-batch` (body: `{exportIds: [...]}`)
+
 ---
 
 ### 4.26 Account Commands
@@ -1997,7 +2095,9 @@ Opening billing portal in browser...
 #### `mynow account delete`
 
 Request account deletion. Sends a confirmation email; account is permanently deleted after
-a 30-day grace period.
+a 30-day grace period. The email contains a link that calls the public confirmation endpoint
+`POST /api/v1/account-deletion/confirm?token=<TOKEN>` — the user clicks the link in their
+email client (not via the CLI) to confirm.
 
 ```
 mynow account delete [--immediate]
@@ -2051,7 +2151,7 @@ Output:
   API KEYS (2)
   ID  Name              Scopes                    Created   Last used   Active
   1   Shell scripts     tasks:list,tasks:view     Mar 1     Mar 9       ✓
-  2   Automation        tasks:*,habits:list        Feb 15    Mar 8       ✓
+  2   Automation        tasks:*,habits:reminders   Feb 15    Mar 8       ✓
 ```
 
 #### `mynow apikey create <name>`
@@ -2068,7 +2168,7 @@ Flags:
 
 Available scopes:
   tasks:list    tasks:view    tasks:create    tasks:update    tasks:delete    tasks:calendar
-  habits:list   habits:view   habits:reminders
+  habits:reminders
   schedules:list  schedules:view  schedules:create  schedules:update  schedules:delete
   projects:list   projects:view   projects:create   projects:update   projects:delete
   user:read     admin:full    agent:full
@@ -2360,6 +2460,40 @@ Resume a paused Pomodoro.
 mynow timer pomodoro resume
 ✓ Pomodoro resumed.
 ```
+
+#### `mynow timer pomodoro interrupt`
+
+Record an interruption on the current Pomodoro session without stopping it.
+
+```
+mynow timer pomodoro interrupt [--reason <text>]
+
+Examples:
+  mynow timer pomodoro interrupt --reason "Phone call from manager"
+✓ Interruption recorded.
+```
+
+API: `PUT /api/v1/pomodoro/sessions/{sessionId}` (body: `{interruptReason: "<text>"}`)
+
+#### `mynow timer pomodoro suggest`
+
+Get suggested tasks to work on given available time.
+
+```
+mynow timer pomodoro suggest [flags]
+
+Flags:
+  --minutes <n>         Available minutes (default: 25)
+  --count <n>           Number of suggestions (default: 3)
+
+Output:
+  POMODORO SUGGESTIONS (25 min available)
+  1. Fix production bug          30m    HIGH   "Overdue by 1 day"
+  2. Review pull requests         1h    MED    "2 PRs pending"
+  3. Update documentation        20m    LOW    "Scheduled for today"
+```
+
+API: `GET /api/v1/pomodoro/suggestions?availableMinutes=25&maxSuggestions=3`
 
 #### `mynow timer pomodoro stop`
 
@@ -3795,9 +3929,11 @@ Complete mapping of CLI commands to MYN API endpoints.
 | `habit schedule status` | GET | `/api/v2/scheduling/habits/status` |
 | `habit reminders` | GET | `/api/habits/reminders` |
 | `habit reminders smart-time <id>` | POST | `/api/habits/reminders/{habitId}/calculate-smart-time` |
-| `chore list` | GET | `/api/v2/chores` |
-| `chore done <id>` | POST | `/api/v2/chores/{id}/complete` |
-| `chore schedule` | GET | `/api/v2/chores/schedule` |
+| `chore list` | GET | `/api/v2/chores/today` (params: `date`, `timezone`, `householdId`) |
+| `chore schedule [date]` | GET | `/api/v2/chores/schedule/{date}` |
+| `chore schedule --range` | GET | `/api/v2/chores/schedule/range` |
+| `chore done <instanceId>` | POST | `/api/v2/chores/instances/{instanceId}/complete` |
+| `chore stats` | GET | `/api/v2/chores/statistics` |
 | `calendar` | GET | `/api/v2/calendar/events` |
 | `calendar add` | POST | `/api/v2/calendar/standalone-events` |
 | `calendar delete <id>` | DELETE | `/api/v2/calendar/events/{id}` |
@@ -3810,11 +3946,16 @@ Complete mapping of CLI commands to MYN API endpoints.
 | `compass complete` | POST | `/api/v2/compass/complete` |
 | `compass status` | GET | `/api/v2/compass/status` |
 | `compass history` | GET | `/api/v2/compass/history` |
-| `timer list` | GET | `/api/v2/timers` |
+| `timer list` | GET | `/api/v2/timers` (params: `status`, `includeCompleted`) |
 | `timer start` | POST | `/api/v2/timers/countdown` |
 | `timer alarm` | POST | `/api/v2/timers/alarm` |
+| `timer pause <id>` | POST | `/api/v2/timers/{id}/pause` |
+| `timer resume <id>` | POST | `/api/v2/timers/{id}/resume` |
 | `timer cancel <id>` | POST | `/api/v2/timers/{id}/cancel` |
-| `timer snooze <id>` | POST | `/api/v2/timers/{id}/snooze` |
+| `timer snooze <id>` | POST | `/api/v2/timers/{id}/snooze` (body: `{snoozeMinutes: N}`) |
+| `timer complete <id>` | POST | `/api/v2/timers/{id}/complete` |
+| `timer dismiss` | DELETE | `/api/v2/timers/completed` (dismiss all completed) |
+| `timer count` | GET | `/api/v2/timers/count` (active timer count) |
 | `timer pomodoro` | POST | `/api/v1/pomodoro/start` |
 | `timer pomodoro smart` | POST | `/api/v1/pomodoro/smart-start` |
 | `timer pomodoro current` | GET | `/api/v1/pomodoro/current` |
@@ -3836,11 +3977,11 @@ Complete mapping of CLI commands to MYN API endpoints.
 | `project list` | GET | `/api/project` |
 | `project show <id>` | GET | `/api/project/{id}` |
 | `project create` | POST | `/api/project/create` |
-| `plan` | POST | `/api/schedules/plan` |
-| `schedule` | POST | `/api/schedules/auto` |
-| `reschedule` | POST | `/api/schedules/reschedule` |
+| `plan` | POST | `/api/ai/chat/stream` (client-side scheduling via AI chat; no dedicated planning endpoint) |
+| `schedule` | GET+PUT | `GET /api/v2/unified-tasks` + `PUT /api/v2/unified-tasks/{id}` (client-side time assignment) |
+| `reschedule` | PUT | `/api/v2/unified-tasks/{id}` (updates `scheduledDate` per task) |
 | `search` | GET | `/api/v2/search` (query params: `q`, `types[]`, `statuses[]`, `priorities[]`, `startDate`, `endDate`, `includeArchived`, `limit`, `offset`) |
-| `whoami` | GET | `/api/v1/customers/me` |
+| `whoami` | GET | `/api/v1/customers` |
 | `goals` | GET | `/api/v1/customers/goals` |
 | `goals set` | PUT | `/api/v1/customers/goals` |
 | `prefs` | GET | `/api/v1/customers/preferences` |
@@ -3854,9 +3995,9 @@ Complete mapping of CLI commands to MYN API endpoints.
 | `memory delete <id>` | DELETE | `/api/v1/customers/memories/{id}` |
 | `memory delete-all` | DELETE | `/api/v1/customers/memories` |
 | `memory export` | GET | `/api/v1/customers/memories/export` |
-| `household` | GET | `/api/v1/customers/me` (extract households) |
+| `household` | GET | `/api/v1/customers` (extract households from response) |
 | `household members` | GET | `/api/v1/households/{hid}/members` |
-| `household invite` | POST | `/api/v1/households/{hid}/invites` |
+| `household invite` | POST | `/api/v1/households/invites` |
 | `task comment list <id>` | GET | `/api/v2/unified-tasks/{id}/comments` |
 | `task comment add <id>` | POST | `/api/v2/unified-tasks/{id}/comments` |
 | `task comment edit <id> <cid>` | PUT | `/api/v2/unified-tasks/{id}/comments/{cid}` |
@@ -3873,8 +4014,8 @@ Complete mapping of CLI commands to MYN API endpoints.
 | `chore rotation order <id>` | PUT | `/api/v2/unified-tasks/{id}/rotation/order` |
 | `notifications` | GET | `/api/v2/notifications` |
 | `notifications unread` | GET | `/api/v2/notifications/unread` |
-| `notifications read <id>` | POST | `/api/v2/notifications/mark-read` |
-| `notifications read-all` | POST | `/api/v2/notifications/mark-read` (markAll=true) |
+| `notifications read <id>` | POST | `/api/v2/notifications/mark-read` (body: `{notificationIds: ["<id>"], markAll: false}`) |
+| `notifications read-all` | POST | `/api/v2/notifications/mark-read` (body: `{notificationIds: [], markAll: true}`) |
 | `notifications delete <id>` | DELETE | `/api/v2/notifications/{id}` |
 | `stats` | GET | multiple: `/api/v1/gamification/streaks` + `/api/v1/pomodoro/stats` + `/api/v1/usage/today` |
 | `stats pomodoro` | GET | `/api/v1/pomodoro/stats` |
@@ -3910,6 +4051,15 @@ Complete mapping of CLI commands to MYN API endpoints.
 | `ai conversations favorite <id>` | PATCH | `/api/v1/ai/conversations/{id}/status` (body: `{favorited: true}`) |
 | `ai conversations delete <id>` | DELETE | `/api/v1/ai/conversations/{id}` |
 | `ai conversations continue <id>` | POST | `/api/v1/ai/conversations/{id}/continue` |
+| `prefs notifications` | GET | `/api/v1/customers/notification-preferences` |
+| `prefs notifications set` | PUT | `/api/v1/customers/notification-preferences` |
+| `prefs timers` | GET | `/api/v2/customers/me/timer-preferences` |
+| `prefs timers set` | PUT | `/api/v2/customers/me/timer-preferences` |
+| `account mcp-sessions` | GET | `/api/v1/customers/mcp-sessions` |
+| `export delete-batch` | POST | `/api/v1/customers/exports/delete-batch` (body: `{exportIds: [...]}`) |
+| `timer pomodoro suggest` | GET | `/api/v1/pomodoro/suggestions` (params: `availableMinutes`, `maxSuggestions`) |
+| `timer pomodoro interrupt` | PUT | `/api/v1/pomodoro/sessions/{sessionId}` (body: `{interruptReason: "..."}`) |
+| `account delete confirm` | POST | `/api/v1/account-deletion/confirm?token=<TOKEN>` (public; called via email link) |
 
 ---
 

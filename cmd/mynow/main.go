@@ -34,6 +34,11 @@ func main() {
 		newInboxCmd(application),
 		newNowCmd(application),
 		newTaskCmd(application),
+		newCompassCmd(application),
+		newHabitCmd(application),
+		newCalendarCmd(application),
+		newTimerCmd(application),
+		newGroceryCmd(application),
 		newReviewCmd(application),
 		newTUICmd(application),
 		newPluginCmd(application),
@@ -83,57 +88,6 @@ func newLogoutCmd(a *app.App) *cobra.Command {
 			return a.Logout()
 		},
 	}
-}
-
-func newInboxCmd(a *app.App) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "inbox",
-		Short: "Manage inbox items",
-	}
-
-	cmd.AddCommand(&cobra.Command{
-		Use:   "add [title]",
-		Short: "Add an item to the inbox",
-		Args:  cobra.MinimumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return a.InboxAdd(args[0])
-		},
-	})
-
-	cmd.AddCommand(&cobra.Command{
-		Use:   "list",
-		Short: "List inbox items",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return a.InboxList()
-		},
-	})
-
-	return cmd
-}
-
-func newNowCmd(a *app.App) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "now",
-		Short: "Manage current focus",
-	}
-
-	cmd.AddCommand(&cobra.Command{
-		Use:   "list",
-		Short: "List current focus items",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return a.NowList()
-		},
-	})
-
-	cmd.AddCommand(&cobra.Command{
-		Use:   "focus",
-		Short: "Show or set current focus",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return a.NowFocus()
-		},
-	})
-
-	return cmd
 }
 
 func newReviewCmd(a *app.App) *cobra.Command {

@@ -47,27 +47,6 @@ func (a *App) Logout() error {
 	return a.Auth.Logout()
 }
 
-// InboxAdd adds an item to the inbox.
-func (a *App) InboxAdd(title string) error {
-	return ErrNotImplemented
-}
-
-// InboxList lists inbox items.
-func (a *App) InboxList() error {
-	return ErrNotImplemented
-}
-
-// NowList shows current focus/now items.
-func (a *App) NowList() error {
-	return ErrNotImplemented
-}
-
-// NowFocus enters focus mode.
-func (a *App) NowFocus() error {
-	return ErrNotImplemented
-}
-
-
 // ReviewDaily runs the daily review.
 func (a *App) ReviewDaily() error {
 	return ErrNotImplemented

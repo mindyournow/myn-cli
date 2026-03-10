@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -112,7 +114,16 @@ func (c *OAuthClient) Authenticate(ctx context.Context) (*TokenResponse, error) 
 	if err != nil {
 		return nil, fmt.Errorf("failed to build auth URL: %w", err)
 	}
-	fmt.Printf("Opening browser for authentication:\n%s\n", authURL)
+
+	// Try to open the browser automatically
+	opened := openBrowser(authURL)
+	if opened {
+		fmt.Println("Browser opened for authentication.")
+	} else {
+		fmt.Println("Could not open browser automatically.")
+	}
+	fmt.Printf("\nIf your browser didn't open, copy and paste this URL:\n\n  %s\n\n", authURL)
+	fmt.Println("Waiting for authentication...")
 
 	// Wait for callback or context cancellation
 	select {
@@ -388,4 +399,21 @@ func sanitizeParam(s string) string {
 func generateCodeChallenge(verifier string) string {
 	hash := sha256.Sum256([]byte(verifier))
 	return base64.RawURLEncoding.EncodeToString(hash[:])
+}
+
+// openBrowser tries to open a URL in the user's default browser.
+// Returns true if the command was launched successfully.
+func openBrowser(url string) bool {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "linux":
+		cmd = exec.Command("xdg-open", url)
+	case "darwin":
+		cmd = exec.Command("open", url)
+	default:
+		return false
+	}
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Start() == nil
 }

@@ -109,6 +109,13 @@ func (tc *TokenCache) Refresh(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("token refresh failed: %w", err)
 	}
 
+	// Save rotated refresh token if the server issued a new one
+	if resp.RefreshToken != "" && resp.RefreshToken != refreshToken {
+		if err := tc.store.SaveRefreshToken(resp.RefreshToken); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to save rotated refresh token: %v\n", err)
+		}
+	}
+
 	expiresIn := int64(resp.ExpiresIn)
 	if expiresIn <= 0 {
 		expiresIn = 3600

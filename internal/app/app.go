@@ -80,6 +80,13 @@ func (a *App) Login(ctx context.Context, device bool) error {
 		return err
 	}
 
+	// Save refresh token to disk so subsequent commands can refresh the access token
+	if tokens.RefreshToken != "" {
+		if err := a.KeyStore.SaveRefreshToken(tokens.RefreshToken); err != nil {
+			_ = a.Formatter.Error(fmt.Sprintf("warning: failed to save refresh token: %v", err))
+		}
+	}
+
 	ttl := time.Duration(tokens.ExpiresIn) * time.Second
 	if ttl <= 0 {
 		ttl = 3600 * time.Second

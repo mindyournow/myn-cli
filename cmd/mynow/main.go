@@ -69,6 +69,7 @@ func main() {
 		newReviewCmd(&application),
 		newTUICmd(&application),
 		newPluginCmd(&application),
+		newConfigCmd(&application),
 	)
 
 	if err := rootCmd.Execute(); err != nil {
@@ -234,6 +235,57 @@ func newPluginCmd(a **app.App) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return (*a).PluginEnable(cmd.Context(), args[0])
+		},
+	})
+
+	return cmd
+}
+
+func newConfigCmd(a **app.App) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "config",
+		Short: "Manage configuration",
+	}
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "show",
+		Short: "Print resolved configuration (secrets redacted)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).ConfigShow(cmd.Context())
+		},
+	})
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "get <key>",
+		Short: "Get a configuration value",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).ConfigGet(cmd.Context(), args[0])
+		},
+	})
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "set <key> <value>",
+		Short: "Set a configuration value",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).ConfigSet(cmd.Context(), args[0], args[1])
+		},
+	})
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "reset",
+		Short: "Reset configuration to defaults",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).ConfigReset(cmd.Context())
+		},
+	})
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "path",
+		Short: "Print the config file path",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).ConfigPath(cmd.Context())
 		},
 	})
 

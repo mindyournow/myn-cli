@@ -122,3 +122,98 @@ func (a *App) PluginList(ctx context.Context) error {
 func (a *App) PluginEnable(ctx context.Context, name string) error {
 	return a.Formatter.Printf("Plugin enable not yet implemented: %s", name)
 }
+
+// ConfigShow prints the resolved configuration (secrets redacted).
+func (a *App) ConfigShow(ctx context.Context) error {
+	cfg := a.Config
+	if a.Formatter.JSON {
+		type jsonCfg struct {
+			ConfigFile string               `json:"config_file"`
+			API        config.APIConfig     `json:"api"`
+			Auth       config.AuthConfig    `json:"auth"`
+			Display    config.DisplayConfig `json:"display"`
+			TUI        config.TUIConfig     `json:"tui"`
+			Defaults   config.DefaultsConfig `json:"defaults"`
+			APIKey     string               `json:"api_key,omitempty"`
+		}
+		out := jsonCfg{
+			ConfigFile: cfg.ConfigFile,
+			API:        cfg.API,
+			Auth:       cfg.Auth,
+			Display:    cfg.Display,
+			TUI:        cfg.TUI,
+			Defaults:   cfg.Defaults,
+		}
+		if cfg.APIKey != "" {
+			out.APIKey = "***redacted***"
+		}
+		return a.Formatter.Print(out)
+	}
+	lines := []string{
+		fmt.Sprintf("config file:                   %s", cfg.ConfigFile),
+		fmt.Sprintf("api.url:                       %s", cfg.API.URL),
+		fmt.Sprintf("api.timeout:                   %s", cfg.API.Timeout),
+		fmt.Sprintf("api.retries:                   %d", cfg.API.Retries),
+		fmt.Sprintf("auth.method:                   %s", cfg.Auth.Method),
+		fmt.Sprintf("auth.keyring:                  %s", cfg.Auth.Keyring),
+		fmt.Sprintf("display.color:                 %s", cfg.Display.Color),
+		fmt.Sprintf("display.date_format:           %s", cfg.Display.DateFormat),
+		fmt.Sprintf("display.time_format:           %s", cfg.Display.TimeFormat),
+		fmt.Sprintf("display.default_output:        %s", cfg.Display.DefaultOutput),
+		fmt.Sprintf("tui.theme:                     %s", cfg.TUI.Theme),
+		fmt.Sprintf("tui.refresh_interval:          %s", cfg.TUI.RefreshInterval),
+		fmt.Sprintf("tui.vim_keys:                  %v", cfg.TUI.VimKeys),
+		fmt.Sprintf("tui.mouse:                     %v", cfg.TUI.Mouse),
+		fmt.Sprintf("tui.animations:                %v", cfg.TUI.Animations),
+		fmt.Sprintf("defaults.priority:             %s", cfg.Defaults.Priority),
+		fmt.Sprintf("defaults.task_type:            %s", cfg.Defaults.TaskType),
+		fmt.Sprintf("defaults.calendar_days:        %d", cfg.Defaults.CalendarDays),
+		fmt.Sprintf("defaults.habit_schedule_days:  %d", cfg.Defaults.HabitScheduleDays),
+	}
+	if cfg.APIKey != "" {
+		lines = append(lines, "api_key:                       ***redacted***")
+	}
+	for _, line := range lines {
+		if err := a.Formatter.Println(line); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ConfigGet prints the value of a single config key.
+func (a *App) ConfigGet(ctx context.Context, key string) error {
+	val, err := config.GetValue(a.Config, key)
+	if err != nil {
+		_ = a.Formatter.Error(err.Error())
+		return err
+	}
+	return a.Formatter.Println(val)
+}
+
+// ConfigSet sets a config key and persists it to the config file.
+func (a *App) ConfigSet(ctx context.Context, key, value string) error {
+	if err := config.SetValue(a.Config, key, value); err != nil {
+		_ = a.Formatter.Error(err.Error())
+		return err
+	}
+	if err := config.Save(a.Config); err != nil {
+		_ = a.Formatter.Error(fmt.Sprintf("failed to save config: %v", err))
+		return err
+	}
+	return a.Formatter.Success(fmt.Sprintf("Set %s = %s", key, value))
+}
+
+// ConfigReset removes the config file, reverting to defaults.
+func (a *App) ConfigReset(ctx context.Context) error {
+	if err := config.Reset(a.Config); err != nil {
+		_ = a.Formatter.Error(err.Error())
+		return err
+	}
+	return a.Formatter.Success("Configuration reset to defaults.")
+}
+
+// ConfigPath prints the path to the config file.
+func (a *App) ConfigPath(ctx context.Context) error {
+	return a.Formatter.Println(a.Config.ConfigFile)
+}

@@ -106,7 +106,11 @@ func (k *Keyring) LoadRefreshToken() (string, error) {
 	}
 
 	// Derive key with the stored salt
-	key := pbkdf2.Key(k.machineSecret(), salt, iterations, keySize, sha256.New)
+	secret, err := k.machineSecret()
+	if err != nil {
+		return "", fmt.Errorf("failed to obtain machine secret: %w", err)
+	}
+	key := pbkdf2.Key(secret, salt, iterations, keySize, sha256.New)
 
 	token, err := decrypt(encrypted, key)
 	if err != nil {
@@ -162,23 +166,27 @@ func (k *Keyring) deriveKey() ([]byte, []byte, error) {
 		return nil, nil, fmt.Errorf("failed to generate salt: %w", err)
 	}
 
-	key := pbkdf2.Key(k.machineSecret(), salt, iterations, keySize, sha256.New)
+	secret, err := k.machineSecret()
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to obtain machine secret: %w", err)
+	}
+	key := pbkdf2.Key(secret, salt, iterations, keySize, sha256.New)
 	return key, salt, nil
 }
 
 // machineSecret returns a machine-specific secret for key derivation.
 // On Linux, this attempts to use the D-Bus machine ID.
 // Falls back to a randomly-generated per-machine key stored with 0600 permissions (HIGH-1 fix).
-func (k *Keyring) machineSecret() []byte {
+func (k *Keyring) machineSecret() ([]byte, error) {
 	// Try to get machine ID on Linux
 	if runtime.GOOS == "linux" {
 		// Try systemd machine ID first
 		if id, err := os.ReadFile("/etc/machine-id"); err == nil && len(id) >= 16 {
-			return id
+			return id, nil
 		}
 		// Fallback to D-Bus machine ID
 		if id, err := os.ReadFile("/var/lib/dbus/machine-id"); err == nil && len(id) >= 16 {
-			return id
+			return id, nil
 		}
 	}
 
@@ -191,29 +199,32 @@ func (k *Keyring) machineSecret() []byte {
 // loadOrCreateMachineKey loads an existing random machine key from disk, or
 // generates and stores a new one if none exists. The key file is stored with
 // 0600 permissions so only the owning user can read it (HIGH-1 fix).
-func (k *Keyring) loadOrCreateMachineKey() []byte {
+func (k *Keyring) loadOrCreateMachineKey() ([]byte, error) {
 	keyFile := filepath.Join(k.credDir(), "machine.key")
 
 	// Try to load an existing 32-byte key
 	if data, err := os.ReadFile(keyFile); err == nil && len(data) == 32 {
-		return data
+		return data, nil
 	}
 
 	// Generate a new random 256-bit key
 	key := make([]byte, 32)
 	if _, err := rand.Read(key); err != nil {
-		// Should never happen; last resort uses hostname hash for consistency
-		hostname, _ := os.Hostname()
-		h := sha256.Sum256([]byte(hostname + "|myn-cli-fallback-v2"))
-		return h[:]
+		return nil, fmt.Errorf("failed to generate machine key: %w", err)
 	}
 
-	// Persist the key so future decryption works
-	if err := os.MkdirAll(k.credDir(), 0700); err == nil {
-		_ = os.WriteFile(keyFile, key, 0600)
+	// Persist the key so future decryption works.
+	// If either MkdirAll or WriteFile fails, return an error rather than silently
+	// continuing — without persistence the key is lost on restart and any token
+	// encrypted with it becomes permanently undecryptable.
+	if err := os.MkdirAll(k.credDir(), 0700); err != nil {
+		return nil, fmt.Errorf("failed to create credentials directory for machine key: %w", err)
+	}
+	if err := os.WriteFile(keyFile, key, 0600); err != nil {
+		return nil, fmt.Errorf("failed to persist machine key (token will be unreadable after restart): %w", err)
 	}
 
-	return key
+	return key, nil
 }
 
 type tokenFileData struct {

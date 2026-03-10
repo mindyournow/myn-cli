@@ -87,14 +87,13 @@ func validateAPIURL(baseURL string) error {
 	return nil
 }
 
-// isLocalhost checks if a hostname is localhost (127.0.0.1, ::1, or localhost variants)
+// isLocalhost checks if a hostname is localhost (127.0.0.1, ::1, or "localhost").
+// The host parameter must already be stripped of port (e.g., via url.URL.Hostname()).
 func isLocalhost(host string) bool {
 	host = strings.ToLower(host)
 	return host == "localhost" ||
 		host == "127.0.0.1" ||
-		host == "::1" ||
-		strings.HasPrefix(host, "localhost:") ||
-		strings.HasPrefix(host, "127.0.0.1:")
+		host == "::1"
 }
 
 // defaultConfigDir returns the configuration directory path.

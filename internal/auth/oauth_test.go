@@ -378,3 +378,32 @@ func TestOAuthClient_RefreshToken_SaveError(t *testing.T) {
 }
 
 var errTest = context.DeadlineExceeded
+
+func TestSanitizeParam(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"plain ascii", "access_denied", "access_denied"},
+		{"empty string", "", ""},
+		{"printable chars", "error message 123!@#", "error message 123!@#"},
+		// ANSI escape: ESC (0x1b) is stripped; printable '[', digits, letters remain.
+		// Without ESC, the terminal won't interpret the sequence as a color code.
+		{"ESC sequence", "\x1b[31mred\x1b[0m", "[31mred[0m"},
+		{"control chars", "foo\x00\x01\x1fbar", "foobar"},
+		{"tab and newline", "foo\t\nbar", "foobar"},
+		{"DEL char", "foo\x7fbar", "foobar"},
+		// Mixed: ESC stripped, remaining printable chars kept
+		{"mixed", "\x1b[1mbold\x1b[0m text", "[1mbold[0m text"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := sanitizeParam(tt.input)
+			if got != tt.want {
+				t.Errorf("sanitizeParam(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}

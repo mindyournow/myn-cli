@@ -89,7 +89,10 @@ func (a *App) ChoreStats(ctx context.Context) error {
 	if a.Formatter.JSON {
 		return a.Formatter.Print(stats)
 	}
-	b, _ := json.MarshalIndent(stats, "", "  ")
+	b, err := json.MarshalIndent(stats, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to format output: %w", err)
+	}
 	return a.Formatter.Println(string(b))
 }
 
@@ -106,7 +109,10 @@ func (a *App) ChoreRotation(ctx context.Context, choreID string) error {
 	if a.Formatter.JSON {
 		return a.Formatter.Print(status)
 	}
-	b, _ := json.MarshalIndent(status, "", "  ")
+	b, err := json.MarshalIndent(status, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to format output: %w", err)
+	}
 	return a.Formatter.Println(string(b))
 }
 

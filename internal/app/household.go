@@ -84,7 +84,10 @@ func (a *App) HouseholdLeaderboard(ctx context.Context, period string) error {
 	if a.Formatter.JSON {
 		return a.Formatter.Print(lb)
 	}
-	b, _ := json.MarshalIndent(lb, "", "  ")
+	b, err := json.MarshalIndent(lb, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to format output: %w", err)
+	}
 	return a.Formatter.Println(string(b))
 }
 
@@ -105,6 +108,9 @@ func (a *App) HouseholdChallenges(ctx context.Context) error {
 	if len(challenges) == 0 {
 		return a.Formatter.Println("No active challenges.")
 	}
-	b, _ := json.MarshalIndent(challenges, "", "  ")
+	b, err := json.MarshalIndent(challenges, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to format output: %w", err)
+	}
 	return a.Formatter.Println(string(b))
 }

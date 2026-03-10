@@ -73,6 +73,7 @@ func (c *Client) StreamPost(ctx context.Context, path string, body interface{}, 
 func readSSE(ctx context.Context, resp *http.Response, handler SSEHandler) error {
 	scanner := bufio.NewScanner(resp.Body)
 	var event SSEEvent
+	gotDone := false
 
 	for scanner.Scan() {
 		select {
@@ -87,6 +88,7 @@ func readSSE(ctx context.Context, resp *http.Response, handler SSEHandler) error
 			// Empty line = dispatch event
 			if event.Data != "" {
 				if event.Data == "[DONE]" {
+					gotDone = true
 					return nil
 				}
 				if err := handler(event); err != nil {
@@ -114,6 +116,9 @@ func readSSE(ctx context.Context, resp *http.Response, handler SSEHandler) error
 
 	if err := scanner.Err(); err != nil {
 		return fmt.Errorf("error reading SSE stream: %w", err)
+	}
+	if !gotDone {
+		return fmt.Errorf("SSE stream ended without [DONE] signal (incomplete response)")
 	}
 	return nil
 }

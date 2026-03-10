@@ -16,6 +16,7 @@ import (
 
 type compassLoadedMsg struct{ briefing *api.CompassBriefing }
 type compassErrMsg struct{ err error }
+type compassActionMsg struct{ msg string }
 type compassGeneratingMsg struct{}
 
 // CompassScreen shows the Compass briefing.
@@ -89,6 +90,10 @@ func (s CompassScreen) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case compassGeneratingMsg:
 		// handled via toast already
 
+	case compassActionMsg:
+		s.toast.Show(msg.msg, "success")
+		return s, tea.Batch(s.loadData(), s.toast.Tick())
+
 	case tea.WindowSizeMsg:
 		s.width = msg.Width
 		s.height = msg.Height
@@ -102,11 +107,17 @@ func (s CompassScreen) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			s.toast.Show("Generating briefing...", "info")
 			return s, tea.Batch(s.generateBriefing(), s.toast.Tick())
 		case "c":
-			s.toast.Show("Correct action (not implemented in TUI)", "info")
-			return s, s.toast.Tick()
+			if s.briefing != nil {
+				s.toast.Show("Applying correction...", "info")
+				return s, tea.Batch(s.correctBriefing(), s.toast.Tick())
+			}
+			return s, nil
 		case "enter":
-			s.toast.Show("Mark complete not implemented in TUI", "info")
-			return s, s.toast.Tick()
+			if s.briefing != nil {
+				s.toast.Show("Completing session...", "info")
+				return s, tea.Batch(s.completeBriefing(), s.toast.Tick())
+			}
+			return s, nil
 		case "j", "down":
 			s.scrollOffset++
 		case "k", "up":
@@ -120,6 +131,39 @@ func (s CompassScreen) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var toastCmd tea.Cmd
 	s.toast, toastCmd = s.toast.Update(msg)
 	return s, toastCmd
+}
+
+func (s CompassScreen) correctBriefing() tea.Cmd {
+	return func() tea.Msg {
+		if s.app == nil || s.briefing == nil {
+			return compassErrMsg{errors.New("no briefing to correct")}
+		}
+		ctx := context.Background()
+		_, err := s.app.Client.ApplyCompassCorrection(ctx, api.CompassCorrectionRequest{
+			SummaryID: s.briefing.ID,
+			Decision:  "correct",
+		})
+		if err != nil {
+			return compassErrMsg{err}
+		}
+		return compassActionMsg{msg: "Correction applied"}
+	}
+}
+
+func (s CompassScreen) completeBriefing() tea.Cmd {
+	return func() tea.Msg {
+		if s.app == nil || s.briefing == nil {
+			return compassErrMsg{errors.New("no briefing to complete")}
+		}
+		ctx := context.Background()
+		_, err := s.app.Client.CompleteCompass(ctx, api.CompleteCompassRequest{
+			Summary: s.briefing.Summary,
+		})
+		if err != nil {
+			return compassErrMsg{err}
+		}
+		return compassActionMsg{msg: "Session completed"}
+	}
 }
 
 // View implements tea.Model.

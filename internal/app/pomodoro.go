@@ -42,7 +42,10 @@ func (a *App) PomodoroSmartStart(ctx context.Context, availableMinutes int) erro
 	if a.Formatter.JSON {
 		return a.Formatter.Print(result)
 	}
-	b, _ := json.MarshalIndent(result, "", "  ")
+	b, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to format output: %w", err)
+	}
 	return a.Formatter.Println(string(b))
 }
 
@@ -163,7 +166,10 @@ func (a *App) PomodoroSuggestions(ctx context.Context, availableMinutes, maxSugg
 	if a.Formatter.JSON {
 		return a.Formatter.Print(suggestions)
 	}
-	b, _ := json.MarshalIndent(suggestions, "", "  ")
+	b, err := json.MarshalIndent(suggestions, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to format output: %w", err)
+	}
 	return a.Formatter.Println(string(b))
 }
 

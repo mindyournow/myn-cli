@@ -109,7 +109,10 @@ func (a *App) AIConversationStats(ctx context.Context) error {
 	if a.Formatter.JSON {
 		return a.Formatter.Print(stats)
 	}
-	b, _ := json.MarshalIndent(stats, "", "  ")
+	b, err := json.MarshalIndent(stats, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to format output: %w", err)
+	}
 	return a.Formatter.Println(string(b))
 }
 
@@ -126,7 +129,10 @@ func (a *App) HabitCalculateSmartTime(ctx context.Context, habitID string) error
 	if a.Formatter.JSON {
 		return a.Formatter.Print(result)
 	}
-	b, _ := json.MarshalIndent(result, "", "  ")
+	b, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to format output: %w", err)
+	}
 	return a.Formatter.Println(string(b))
 }
 

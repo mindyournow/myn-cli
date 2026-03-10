@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -104,6 +106,9 @@ func main() {
 	)
 
 	if err := rootCmd.Execute(); err != nil {
+		if errors.Is(err, context.Canceled) {
+			os.Exit(130) // Standard Unix exit code for SIGINT
+		}
 		os.Exit(mynerrors.ExitCode(err))
 	}
 }
@@ -549,7 +554,7 @@ func newTUICmd(a **app.App) *cobra.Command {
 		Use:   "tui",
 		Short: "Launch interactive TUI",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return (*a).RunTUI(cmd.Context())
+			return tui.Run(*a)
 		},
 	}
 }

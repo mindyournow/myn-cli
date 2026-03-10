@@ -140,7 +140,10 @@ func (a *App) HabitSchedule(ctx context.Context, days int) error {
 	if a.Formatter.JSON {
 		return a.Formatter.Print(result)
 	}
-	b, _ := json.MarshalIndent(result, "", "  ")
+	b, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to format output: %w", err)
+	}
 	return a.Formatter.Println(string(b))
 }
 
@@ -157,6 +160,9 @@ func (a *App) HabitReminders(ctx context.Context) error {
 	if a.Formatter.JSON {
 		return a.Formatter.Print(reminders)
 	}
-	b, _ := json.MarshalIndent(reminders, "", "  ")
+	b, err := json.MarshalIndent(reminders, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to format output: %w", err)
+	}
 	return a.Formatter.Println(string(b))
 }

@@ -150,7 +150,10 @@ func (a *App) AccountUsage(ctx context.Context) error {
 	if a.Formatter.JSON {
 		return a.Formatter.Print(usage)
 	}
-	b, _ := json.MarshalIndent(usage, "", "  ")
+	b, err := json.MarshalIndent(usage, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to format output: %w", err)
+	}
 	return a.Formatter.Println(string(b))
 }
 
@@ -167,6 +170,9 @@ func (a *App) AccountLimits(ctx context.Context) error {
 	if a.Formatter.JSON {
 		return a.Formatter.Print(limits)
 	}
-	b, _ := json.MarshalIndent(limits, "", "  ")
+	b, err := json.MarshalIndent(limits, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to format output: %w", err)
+	}
 	return a.Formatter.Println(string(b))
 }

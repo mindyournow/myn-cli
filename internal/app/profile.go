@@ -105,7 +105,10 @@ func (a *App) ProfileNotifications(ctx context.Context) error {
 	if a.Formatter.JSON {
 		return a.Formatter.Print(prefs)
 	}
-	b, _ := json.MarshalIndent(prefs, "", "  ")
+	b, err := json.MarshalIndent(prefs, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to format output: %w", err)
+	}
 	return a.Formatter.Println(string(b))
 }
 
@@ -122,6 +125,9 @@ func (a *App) ProfileTimers(ctx context.Context) error {
 	if a.Formatter.JSON {
 		return a.Formatter.Print(prefs)
 	}
-	b, _ := json.MarshalIndent(prefs, "", "  ")
+	b, err := json.MarshalIndent(prefs, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to format output: %w", err)
+	}
 	return a.Formatter.Println(string(b))
 }

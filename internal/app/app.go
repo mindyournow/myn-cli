@@ -549,11 +549,10 @@ func (a *App) ReviewWeekly(ctx context.Context) error {
 	return a.Formatter.Println("\nReview complete.")
 }
 
-// RunTUI launches the interactive TUI.
-// The actual TUI is started by calling tui.Run from the cmd layer to avoid import cycles.
-// This method is kept for interface compatibility; cmd/mynow/main.go calls tui.Run directly.
+// RunTUI is deprecated — TUI is launched directly via tui.Run() from the cmd layer.
+// Kept only for interface compatibility if any external code references it.
 func (a *App) RunTUI(ctx context.Context) error {
-	return a.Formatter.Println("Use 'mynow tui' or run via the TUI entry point.")
+	return fmt.Errorf("use tui.Run(app) directly; this method is deprecated")
 }
 
 // derefBool safely dereferences a *bool pointer, returning false if nil.

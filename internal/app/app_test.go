@@ -152,23 +152,19 @@ func TestApp_ReviewDaily(t *testing.T) {
 	}
 }
 
-func TestApp_RunTUI(t *testing.T) {
+func TestApp_RunTUI_Deprecated(t *testing.T) {
 	app, err := New()
 	if err != nil {
 		t.Skipf("Skipping: New() error = %v", err)
 	}
 
-	var buf bytes.Buffer
-	app.SetFormatter(output.NewFormatterWithWriter(&buf, false, false, true))
-
 	ctx := context.Background()
 	err = app.RunTUI(ctx)
-	if err != nil {
-		t.Fatalf("RunTUI() error = %v", err)
+	if err == nil {
+		t.Fatal("RunTUI() should return error (deprecated method)")
 	}
-
-	if buf.String() == "" {
-		t.Error("Output should not be empty")
+	if !strings.Contains(err.Error(), "deprecated") {
+		t.Errorf("RunTUI() error = %v, want 'deprecated' message", err)
 	}
 }
 
@@ -192,7 +188,7 @@ func TestApp_PluginList(t *testing.T) {
 	}
 }
 
-func TestApp_PluginEnable(t *testing.T) {
+func TestApp_PluginEnable_NotFound(t *testing.T) {
 	app, err := New()
 	if err != nil {
 		t.Skipf("Skipping: New() error = %v", err)
@@ -202,13 +198,12 @@ func TestApp_PluginEnable(t *testing.T) {
 	app.SetFormatter(output.NewFormatterWithWriter(&buf, false, false, true))
 
 	ctx := context.Background()
-	err = app.PluginEnable(ctx, "my-plugin")
-	if err != nil {
-		t.Fatalf("PluginEnable() error = %v", err)
+	err = app.PluginEnable(ctx, "nonexistent-plugin")
+	if err == nil {
+		t.Fatal("PluginEnable() should error for nonexistent plugin")
 	}
-
-	if !strings.Contains(buf.String(), "my-plugin") {
-		t.Errorf("Output = %q, should contain 'my-plugin'", buf.String())
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("Error = %v, should contain 'not found'", err)
 	}
 }
 

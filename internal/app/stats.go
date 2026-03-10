@@ -91,7 +91,10 @@ func (a *App) StatsProductivity(ctx context.Context) error {
 	if a.Formatter.JSON {
 		return a.Formatter.Print(stats)
 	}
-	b, _ := json.MarshalIndent(stats, "", "  ")
+	b, err := json.MarshalIndent(stats, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to format output: %w", err)
+	}
 	return a.Formatter.Println(string(b))
 }
 
@@ -108,6 +111,9 @@ func (a *App) StatsPomodoroStats(ctx context.Context) error {
 	if a.Formatter.JSON {
 		return a.Formatter.Print(stats)
 	}
-	b, _ := json.MarshalIndent(stats, "", "  ")
+	b, err := json.MarshalIndent(stats, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to format output: %w", err)
+	}
 	return a.Formatter.Println(string(b))
 }

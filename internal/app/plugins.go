@@ -26,9 +26,15 @@ func (a *App) PluginList(ctx context.Context) error {
 	return nil
 }
 
-// PluginEnable enables a plugin (placeholder — plugins are auto-discovered).
+// PluginEnable is a no-op: plugins are auto-discovered from PATH and ~/.local/share/mynow/plugins/.
+// Any executable named "mynow-<name>" is automatically available.
 func (a *App) PluginEnable(ctx context.Context, name string) error {
-	return a.Formatter.Println(fmt.Sprintf("Plugin %q enabled (auto-discovered).", name))
+	// Verify the plugin actually exists before reporting success
+	pluginBin := "mynow-" + name
+	if _, err := exec.LookPath(pluginBin); err != nil {
+		return fmt.Errorf("plugin %q not found (install an executable named %q in PATH or ~/.local/share/mynow/plugins/)", name, pluginBin)
+	}
+	return a.Formatter.Println(fmt.Sprintf("Plugin %q is available (auto-discovered — no enable needed).", name))
 }
 
 // PluginRun executes a plugin.

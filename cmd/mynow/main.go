@@ -63,6 +63,8 @@ func main() {
 		newVersionCmd(),
 		newLoginCmd(&application),
 		newLogoutCmd(&application),
+		newWhoamiCmd(&application),
+		newAuthCmd(&application),
 		newInboxCmd(&application),
 		newNowCmd(&application),
 		newTaskCmd(&application),
@@ -93,10 +95,52 @@ func newLoginCmd(a **app.App) *cobra.Command {
 		Short: "Authenticate with MYN backend",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			device, _ := cmd.Flags().GetBool("device")
+			apiKeyFlag, _ := cmd.Flags().GetBool("api-key")
+			if apiKeyFlag {
+				fmt.Fprint(cmd.OutOrStdout(), "Enter your MYN API key: ")
+				var key string
+				if _, err := fmt.Fscan(cmd.InOrStdin(), &key); err != nil {
+					return fmt.Errorf("failed to read API key: %w", err)
+				}
+				return (*a).LoginAPIKey(cmd.Context(), key)
+			}
 			return (*a).Login(cmd.Context(), device)
 		},
 	}
 	cmd.Flags().Bool("device", false, "Use device authorization flow (headless environments)")
+	cmd.Flags().Bool("api-key", false, "Authenticate using an API key")
+	return cmd
+}
+
+func newWhoamiCmd(a **app.App) *cobra.Command {
+	return &cobra.Command{
+		Use:   "whoami",
+		Short: "Show current authenticated user",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).Whoami(cmd.Context())
+		},
+	}
+}
+
+func newAuthCmd(a **app.App) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "auth",
+		Short: "Authentication management",
+	}
+	cmd.AddCommand(&cobra.Command{
+		Use:   "status",
+		Short: "Show current authentication status",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).AuthStatus(cmd.Context())
+		},
+	})
+	cmd.AddCommand(&cobra.Command{
+		Use:   "refresh",
+		Short: "Force token refresh",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).AuthRefresh(cmd.Context())
+		},
+	})
 	return cmd
 }
 

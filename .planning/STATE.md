@@ -186,6 +186,7 @@ The 4 existing stub groups (task, inbox, now, review) need real implementations.
 - **[2026-03-10T01:30Z] review-agent → CHANGES-REQUESTED** — Incomplete scope, wrong OAuth paths
 - **[2026-03-10T01:32Z] review-agent → CHANGES-REQUESTED** — Security review findings
 - **[2026-03-10T02:00Z] Opus 4.6 audit** — Full spec audit: ~5% coverage, detailed gap analysis
+- **[2026-03-10T02:31Z] review-agent → CHANGES-REQUESTED** — `.planning/feedback/005-review-agent-changes-requested.md`
 
 ## Previous Fixes Applied (by Kimi agent)
 

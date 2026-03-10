@@ -17,8 +17,9 @@ import (
 type Client struct {
 	BaseURL    string
 	HTTPClient *http.Client
-	mu         sync.RWMutex // protects token field (B41 fix - mutex protection)
-	token      string
+	mu         sync.RWMutex // protects token and apiKey fields
+	token      string       // OAuth Bearer token
+	apiKey     string       // API key for X-API-KEY header
 }
 
 // NewClient creates a new API client.
@@ -38,11 +39,25 @@ func (c *Client) SetToken(token string) {
 	c.token = token
 }
 
+// SetAPIKey sets the API key for X-API-KEY authenticated requests.
+func (c *Client) SetAPIKey(key string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.apiKey = key
+}
+
 // getToken safely retrieves the current token.
 func (c *Client) getToken() string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.token
+}
+
+// getAPIKey safely retrieves the current API key.
+func (c *Client) getAPIKey() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.apiKey
 }
 
 // RequestOptions contains options for making HTTP requests.
@@ -144,8 +159,10 @@ func (c *Client) DoRequest(ctx context.Context, opts RequestOptions) (*Response,
 			req.Header.Set("Content-Type", "application/json")
 		}
 
-		// Set authorization header if token is available
-		if token := c.getToken(); token != "" {
+		// Set authorization header: prefer API key, fall back to Bearer token
+		if apiKey := c.getAPIKey(); apiKey != "" {
+			req.Header.Set("X-API-KEY", apiKey)
+		} else if token := c.getToken(); token != "" {
 			req.Header.Set("Authorization", "Bearer "+token)
 		}
 

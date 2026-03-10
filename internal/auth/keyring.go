@@ -158,6 +158,62 @@ func (k *Keyring) credDir() string {
 	return filepath.Join(k.configDir, credentialsDir)
 }
 
+// saveRawCredential encrypts and saves an arbitrary string credential by filename.
+func (k *Keyring) saveRawCredential(filename, value string) error {
+	if value == "" {
+		return fmt.Errorf("credential value cannot be empty")
+	}
+	credDir := k.credDir()
+	if err := os.MkdirAll(credDir, 0700); err != nil {
+		return fmt.Errorf("failed to create credentials directory: %w", err)
+	}
+	key, salt, err := k.deriveKey()
+	if err != nil {
+		return fmt.Errorf("failed to derive encryption key: %w", err)
+	}
+	encrypted, err := encrypt(value, key)
+	if err != nil {
+		return fmt.Errorf("failed to encrypt credential: %w", err)
+	}
+	data, err := json.Marshal(&tokenFileData{
+		Salt:      base64.StdEncoding.EncodeToString(salt),
+		Encrypted: base64.StdEncoding.EncodeToString(encrypted),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to marshal credential data: %w", err)
+	}
+	return os.WriteFile(filepath.Join(credDir, filename), data, 0600)
+}
+
+// loadRawCredential decrypts and returns an arbitrary credential by filename.
+func (k *Keyring) loadRawCredential(filename string) (string, error) {
+	data, err := os.ReadFile(filepath.Join(k.credDir(), filename))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf("no credential found")
+		}
+		return "", fmt.Errorf("failed to read credential file: %w", err)
+	}
+	var td tokenFileData
+	if err := json.Unmarshal(data, &td); err != nil {
+		return "", fmt.Errorf("failed to unmarshal credential data: %w", err)
+	}
+	salt, err := base64.StdEncoding.DecodeString(td.Salt)
+	if err != nil {
+		return "", fmt.Errorf("failed to decode salt: %w", err)
+	}
+	encrypted, err := base64.StdEncoding.DecodeString(td.Encrypted)
+	if err != nil {
+		return "", fmt.Errorf("failed to decode encrypted data: %w", err)
+	}
+	secret, err := k.machineSecret()
+	if err != nil {
+		return "", fmt.Errorf("failed to obtain machine secret: %w", err)
+	}
+	key := pbkdf2.Key(secret, salt, iterations, keySize, sha256.New)
+	return decrypt(encrypted, key)
+}
+
 // deriveKey derives an encryption key using PBKDF2.
 // Returns the key, the salt used, and any error.
 func (k *Keyring) deriveKey() ([]byte, []byte, error) {

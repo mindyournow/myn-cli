@@ -283,12 +283,11 @@ func TestApp_Login_DeviceNotImplemented(t *testing.T) {
 	app.SetFormatter(output.NewFormatterWithWriter(&buf, false, false, true))
 
 	ctx := context.Background()
-	err = app.Login(ctx, true) // device flow
-	if err != nil {
-		t.Fatalf("Login() error = %v", err)
+	err = app.Login(ctx, true) // device flow — expected to fail with "not supported"
+	if err == nil {
+		t.Fatal("Login() expected error for device flow, got nil")
 	}
-
-	if buf.String() == "" {
-		t.Error("Output should not be empty")
+	if !strings.Contains(err.Error(), "not yet supported") {
+		t.Errorf("Login() error = %v, want 'not yet supported'", err)
 	}
 }

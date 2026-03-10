@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/mindyournow/myn-cli/internal/api"
 	"github.com/mindyournow/myn-cli/internal/auth"
@@ -12,10 +13,12 @@ import (
 
 // App is the central application struct shared by CLI and TUI.
 type App struct {
-	Config    *config.Config
-	Client    *api.Client
-	Keyring   *auth.Keyring
-	Formatter *output.Formatter
+	Config     *config.Config
+	Client     *api.Client
+	Keyring    *auth.Keyring
+	KeyStore   *auth.KeyStore
+	TokenCache *auth.TokenCache
+	Formatter  *output.Formatter
 }
 
 // New creates a new App instance using environment variables and defaults.
@@ -31,11 +34,18 @@ func New() (*App, error) {
 // NewWithConfig creates an App from an already-loaded Config.
 // Used when flags (e.g., --api-url) override the loaded configuration (BUG-3 fix).
 func NewWithConfig(cfg *config.Config) *App {
+	fileKeyring := auth.NewKeyring(cfg.ConfigDir)
+	keyStore := auth.NewKeyStore(fileKeyring, cfg.Auth.Keyring)
+	oauthClient := auth.NewOAuthClient(cfg.BaseURL, keyStore)
+	tokenCache := auth.NewTokenCache(keyStore, oauthClient)
+
 	return &App{
-		Config:    cfg,
-		Client:    api.NewClient(cfg.BaseURL),
-		Keyring:   auth.NewKeyring(cfg.ConfigDir),
-		Formatter: output.NewFormatter(false, false, false),
+		Config:     cfg,
+		Client:     api.NewClient(cfg.BaseURL),
+		Keyring:    fileKeyring,
+		KeyStore:   keyStore,
+		TokenCache: tokenCache,
+		Formatter:  output.NewFormatter(false, false, false),
 	}
 }
 
@@ -44,33 +54,143 @@ func (a *App) SetFormatter(f *output.Formatter) {
 	a.Formatter = f
 }
 
-// Login performs authentication with the MYN backend.
+// Login performs OAuth PKCE authentication.
 func (a *App) Login(ctx context.Context, device bool) error {
 	if device {
-		return a.Formatter.Info("Device authorization flow not yet implemented.")
+		d := auth.NewDeviceClient(a.Config.BaseURL)
+		if err := d.Authorize(ctx); err != nil {
+			_ = a.Formatter.Error(err.Error())
+			return err
+		}
+		return nil
 	}
 
-	oauthClient := auth.NewOAuthClient(a.Config.BaseURL, a.Keyring)
+	oauthClient := auth.NewOAuthClient(a.Config.BaseURL, a.KeyStore)
 	tokens, err := oauthClient.Authenticate(ctx)
 	if err != nil {
-		// Print to stderr and return the actual error (BUG-1 fix: don't swallow errors)
 		_ = a.Formatter.Error(fmt.Sprintf("authentication failed: %v", err))
 		return err
 	}
 
+	ttl := time.Duration(tokens.ExpiresIn) * time.Second
+	if ttl <= 0 {
+		ttl = 3600 * time.Second
+	}
+	a.TokenCache.SetAccessToken(tokens.AccessToken, ttl)
+	a.TokenCache.SetAuthMethod(auth.AuthMethodOAuth)
 	a.Client.SetToken(tokens.AccessToken)
 	return a.Formatter.Success("Successfully authenticated!")
 }
 
+// LoginAPIKey authenticates using an API key.
+func (a *App) LoginAPIKey(ctx context.Context, apiKey string) error {
+	client := auth.NewAPIKeyClient(a.Config.BaseURL, a.KeyStore)
+	profile, err := client.Login(ctx, apiKey)
+	if err != nil {
+		_ = a.Formatter.Error(fmt.Sprintf("API key authentication failed: %v", err))
+		return err
+	}
+	a.Client.SetAPIKey(apiKey)
+	a.TokenCache.SetAuthMethod(auth.AuthMethodAPIKey)
+	return a.Formatter.Success(fmt.Sprintf("Authenticated as %s (%s) using API key.", profile.Name, profile.Email))
+}
+
 // Logout clears stored credentials.
 func (a *App) Logout(ctx context.Context) error {
-	if err := a.Keyring.Clear(); err != nil {
-		// Print to stderr and return the actual error (BUG-1 fix: don't swallow errors)
+	if err := a.KeyStore.Clear(); err != nil {
 		_ = a.Formatter.Error(fmt.Sprintf("failed to clear credentials: %v", err))
 		return err
 	}
 	a.Client.SetToken("")
+	a.Client.SetAPIKey("")
 	return a.Formatter.Success("Logged out successfully.")
+}
+
+// Whoami displays the current authenticated user's profile.
+func (a *App) Whoami(ctx context.Context) error {
+	// Try API key first
+	apiKey, _ := a.KeyStore.LoadAPIKey()
+	if apiKey != "" {
+		client := auth.NewAPIKeyClient(a.Config.BaseURL, a.KeyStore)
+		profile, err := client.Validate(ctx, apiKey)
+		if err != nil {
+			_ = a.Formatter.Error(fmt.Sprintf("failed to get profile: %v", err))
+			return err
+		}
+		if a.Formatter.JSON {
+			return a.Formatter.Print(profile)
+		}
+		_ = a.Formatter.Println(fmt.Sprintf("Name:     %s", profile.Name))
+		_ = a.Formatter.Println(fmt.Sprintf("Email:    %s", profile.Email))
+		_ = a.Formatter.Println(fmt.Sprintf("Username: %s", profile.Username))
+		return a.Formatter.Println("Auth:     API key")
+	}
+
+	// OAuth: ensure we have a valid access token
+	accessToken, err := a.TokenCache.GetAccessToken(ctx)
+	if err != nil {
+		_ = a.Formatter.Error(fmt.Sprintf("not authenticated (run 'mynow login'): %v", err))
+		return err
+	}
+	a.Client.SetToken(accessToken)
+
+	resp, err := a.Client.Get(ctx, "/api/v1/customers", nil)
+	if err != nil {
+		_ = a.Formatter.Error(fmt.Sprintf("failed to get profile: %v", err))
+		return err
+	}
+	var profile auth.CustomerProfile
+	if err := resp.DecodeJSON(&profile); err != nil {
+		_ = a.Formatter.Error(fmt.Sprintf("failed to parse profile: %v", err))
+		return err
+	}
+	if a.Formatter.JSON {
+		return a.Formatter.Print(profile)
+	}
+	_ = a.Formatter.Println(fmt.Sprintf("Name:     %s", profile.Name))
+	_ = a.Formatter.Println(fmt.Sprintf("Email:    %s", profile.Email))
+	_ = a.Formatter.Println(fmt.Sprintf("Username: %s", profile.Username))
+	return a.Formatter.Println("Auth:     OAuth")
+}
+
+// AuthStatus shows the current authentication status.
+func (a *App) AuthStatus(ctx context.Context) error {
+	method := a.TokenCache.GetAuthMethod()
+	if method == "" {
+		// Try to detect from stored credentials
+		if apiKey, err := a.KeyStore.LoadAPIKey(); err == nil && apiKey != "" {
+			method = auth.AuthMethodAPIKey
+		} else if _, err := a.KeyStore.LoadRefreshToken(); err == nil {
+			method = auth.AuthMethodOAuth
+		} else {
+			return a.Formatter.Println("Not authenticated. Run 'mynow login' to authenticate.")
+		}
+	}
+	if a.Formatter.JSON {
+		return a.Formatter.Print(map[string]interface{}{
+			"method":    string(method),
+			"expiresAt": a.TokenCache.ExpiresAt().Format(time.RFC3339),
+		})
+	}
+	_ = a.Formatter.Println(fmt.Sprintf("Auth method:   %s", method))
+	if method == auth.AuthMethodOAuth && !a.TokenCache.ExpiresAt().IsZero() {
+		_ = a.Formatter.Println(fmt.Sprintf("Token expires: %s", a.TokenCache.ExpiresAt().Format("2006-01-02 15:04:05")))
+	}
+	_ = a.Formatter.Println(fmt.Sprintf("Keyring:       %s", a.Config.Auth.Keyring))
+	return nil
+}
+
+// AuthRefresh forces a token refresh.
+func (a *App) AuthRefresh(ctx context.Context) error {
+	if a.TokenCache.GetAuthMethod() == auth.AuthMethodAPIKey {
+		return a.Formatter.Info("API key auth does not require token refresh.")
+	}
+	_, err := a.TokenCache.Refresh(ctx)
+	if err != nil {
+		_ = a.Formatter.Error(fmt.Sprintf("token refresh failed: %v", err))
+		return err
+	}
+	return a.Formatter.Success("Token refreshed successfully.")
 }
 
 // InboxAdd adds an item to the inbox.

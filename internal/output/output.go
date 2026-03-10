@@ -3,6 +3,7 @@ package output
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 )
 
@@ -11,14 +12,123 @@ type Formatter struct {
 	JSON    bool
 	Quiet   bool
 	NoColor bool
+	output  io.Writer
 }
 
-func (f *Formatter) Print(data any) {
-	if f.JSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		enc.Encode(data)
-		return
+// NewFormatter creates a new Formatter with the specified options.
+func NewFormatter(json, quiet, noColor bool) *Formatter {
+	return NewFormatterWithWriter(os.Stdout, json, quiet, noColor)
+}
+
+// NewFormatterWithWriter creates a new Formatter with a custom writer.
+func NewFormatterWithWriter(w io.Writer, json, quiet, noColor bool) *Formatter {
+	return &Formatter{
+		JSON:    json,
+		Quiet:   quiet,
+		NoColor: noColor,
+		output:  w,
 	}
-	fmt.Println(data)
+}
+
+// SetWriter sets the output writer.
+func (f *Formatter) SetWriter(w io.Writer) {
+	f.output = w
+}
+
+// Print outputs data in the configured format.
+// Returns an error if JSON encoding fails.
+func (f *Formatter) Print(data any) error {
+	if f.Quiet {
+		return nil
+	}
+
+	if f.JSON {
+		enc := json.NewEncoder(f.output)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(data); err != nil {
+			return fmt.Errorf("failed to encode JSON: %w", err)
+		}
+		return nil
+	}
+
+	fmt.Fprintln(f.output, data)
+	return nil
+}
+
+// Printf prints a formatted string.
+func (f *Formatter) Printf(format string, args ...any) error {
+	if f.Quiet {
+		return nil
+	}
+	_, err := fmt.Fprintf(f.output, format+"\n", args...)
+	return err
+}
+
+// Println prints a line of text.
+func (f *Formatter) Println(args ...any) error {
+	if f.Quiet {
+		return nil
+	}
+	_, err := fmt.Fprintln(f.output, args...)
+	return err
+}
+
+// PrintJSON prints data as JSON regardless of the JSON setting.
+// Useful for commands that always output JSON.
+func (f *Formatter) PrintJSON(data any) error {
+	enc := json.NewEncoder(f.output)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(data); err != nil {
+		return fmt.Errorf("failed to encode JSON: %w", err)
+	}
+	return nil
+}
+
+// Success prints a success message.
+func (f *Formatter) Success(msg string) error {
+	if f.Quiet {
+		return nil
+	}
+	if !f.NoColor {
+		msg = "\033[32m" + msg + "\033[0m" // Green
+	}
+	_, err := fmt.Fprintln(f.output, msg)
+	return err
+}
+
+// Error prints an error message.
+func (f *Formatter) Error(msg string) error {
+	if f.Quiet {
+		return nil
+	}
+	if !f.NoColor {
+		msg = "\033[31mError: " + msg + "\033[0m" // Red
+	} else {
+		msg = "Error: " + msg
+	}
+	_, err := fmt.Fprintln(f.output, msg)
+	return err
+}
+
+// Warning prints a warning message.
+func (f *Formatter) Warning(msg string) error {
+	if f.Quiet {
+		return nil
+	}
+	if !f.NoColor {
+		msg = "\033[33mWarning: " + msg + "\033[0m" // Yellow
+	} else {
+		msg = "Warning: " + msg
+	}
+	_, err := fmt.Fprintln(f.output, msg)
+	return err
+}
+
+// Info prints an info message.
+func (f *Formatter) Info(msg string) error {
+	if f.Quiet {
+		return nil
+	}
+	_, err := fmt.Fprintln(f.output, msg)
+	return err
 }

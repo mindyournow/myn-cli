@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 )
@@ -16,8 +17,14 @@ type Config struct {
 	PluginDir string
 }
 
-func Load() *Config {
-	configDir := defaultConfigDir()
+// Load loads the configuration from environment variables and defaults.
+// Returns an error if the config directory cannot be determined.
+func Load() (*Config, error) {
+	configDir, err := defaultConfigDir()
+	if err != nil {
+		return nil, fmt.Errorf("failed to determine config directory: %w", err)
+	}
+
 	baseURL := os.Getenv("MYN_API_URL")
 	if baseURL == "" {
 		baseURL = DefaultBaseURL
@@ -27,13 +34,18 @@ func Load() *Config {
 		BaseURL:   baseURL,
 		ConfigDir: configDir,
 		PluginDir: filepath.Join(configDir, "plugins"),
-	}
+	}, nil
 }
 
-func defaultConfigDir() string {
+// defaultConfigDir returns the configuration directory path.
+// It checks XDG_CONFIG_HOME first, then falls back to ~/.config/mynow.
+func defaultConfigDir() (string, error) {
 	if dir := os.Getenv("XDG_CONFIG_HOME"); dir != "" {
-		return filepath.Join(dir, AppName)
+		return filepath.Join(dir, AppName), nil
 	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".config", AppName)
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("failed to get user home directory: %w", err)
+	}
+	return filepath.Join(home, ".config", AppName), nil
 }

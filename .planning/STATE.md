@@ -120,3 +120,7 @@ Security fixes (CLI-35), dependencies (CLI-36), arch bugs (CLI-37) all verified 
 4. PKCE listener-first-then-register flow (port consistency)
 5. Single binary providing both CLI and TUI modes
 6. `internal/` packages to minimize public API surface
+
+## Specialist Feedback
+
+- **[2026-03-10T12:29Z] review-agent → CHANGES-REQUESTED** — `.planning/feedback/007-review-agent-changes-requested.md`

@@ -57,6 +57,9 @@ func (s HabitsScreen) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case habitsLoadedMsg:
 		s.tasks = msg.tasks
 		s.loading = false
+		if s.cursor >= len(s.dueHabits()) {
+			s.cursor = max(0, len(s.dueHabits())-1)
+		}
 
 	case habitsErrMsg:
 		s.err = msg.err

@@ -246,25 +246,40 @@ func (a *App) InboxProcess(ctx context.Context) error {
 		}
 		switch choice {
 		case "c":
-			_, _ = a.Client.UpdateTask(ctx, t.ID, api.UpdateTaskRequest{Priority: "CRITICAL"})
-			_ = a.Formatter.Println(fmt.Sprintf("  ✓ %q → Critical Now", t.Title))
-			processed++
+			if _, err := a.Client.UpdateTask(ctx, t.ID, api.UpdateTaskRequest{Priority: "CRITICAL"}); err != nil {
+				_ = a.Formatter.Error(fmt.Sprintf("failed to update task: %v", err))
+			} else {
+				_ = a.Formatter.Println(fmt.Sprintf("  ✓ %q → Critical Now", t.Title))
+				processed++
+			}
 		case "o":
-			_, _ = a.Client.UpdateTask(ctx, t.ID, api.UpdateTaskRequest{Priority: "OPPORTUNITY_NOW"})
-			_ = a.Formatter.Println(fmt.Sprintf("  ✓ %q → Opportunity Now", t.Title))
-			processed++
+			if _, err := a.Client.UpdateTask(ctx, t.ID, api.UpdateTaskRequest{Priority: "OPPORTUNITY_NOW"}); err != nil {
+				_ = a.Formatter.Error(fmt.Sprintf("failed to update task: %v", err))
+			} else {
+				_ = a.Formatter.Println(fmt.Sprintf("  ✓ %q → Opportunity Now", t.Title))
+				processed++
+			}
 		case "h":
-			_, _ = a.Client.UpdateTask(ctx, t.ID, api.UpdateTaskRequest{Priority: "OVER_THE_HORIZON"})
-			_ = a.Formatter.Println(fmt.Sprintf("  ✓ %q → Over The Horizon", t.Title))
-			processed++
+			if _, err := a.Client.UpdateTask(ctx, t.ID, api.UpdateTaskRequest{Priority: "OVER_THE_HORIZON"}); err != nil {
+				_ = a.Formatter.Error(fmt.Sprintf("failed to update task: %v", err))
+			} else {
+				_ = a.Formatter.Println(fmt.Sprintf("  ✓ %q → Over The Horizon", t.Title))
+				processed++
+			}
 		case "p":
-			_, _ = a.Client.UpdateTask(ctx, t.ID, api.UpdateTaskRequest{Priority: "PARKING_LOT"})
-			_ = a.Formatter.Println(fmt.Sprintf("  ✓ %q → Parking Lot", t.Title))
-			processed++
+			if _, err := a.Client.UpdateTask(ctx, t.ID, api.UpdateTaskRequest{Priority: "PARKING_LOT"}); err != nil {
+				_ = a.Formatter.Error(fmt.Sprintf("failed to update task: %v", err))
+			} else {
+				_ = a.Formatter.Println(fmt.Sprintf("  ✓ %q → Parking Lot", t.Title))
+				processed++
+			}
 		case "d":
-			_ = a.Client.DeleteTask(ctx, t.ID, false)
-			_ = a.Formatter.Println(fmt.Sprintf("  ✗ %q deleted", t.Title))
-			processed++
+			if err := a.Client.DeleteTask(ctx, t.ID, false); err != nil {
+				_ = a.Formatter.Error(fmt.Sprintf("failed to delete task: %v", err))
+			} else {
+				_ = a.Formatter.Println(fmt.Sprintf("  ✗ %q deleted", t.Title))
+				processed++
+			}
 		default:
 			_ = a.Formatter.Println("  → skipped")
 		}
@@ -290,13 +305,16 @@ func (a *App) InboxClear(ctx context.Context) error {
 	if len(ids) == 0 {
 		return a.Formatter.Println("Inbox is already empty.")
 	}
-	req := api.BatchUpdateRequest{IDs: ids, Updates: api.UpdateTaskRequest{}}
 	// Archive by deleting each individually (BatchUpdate doesn't support archived field directly)
+	var failed int
 	for _, id := range ids {
-		_ = a.Client.DeleteTask(ctx, id, false)
+		if err := a.Client.DeleteTask(ctx, id, false); err != nil {
+			failed++
+			_ = a.Formatter.Error(fmt.Sprintf("failed to clear task %s: %v", id, err))
+		}
 	}
-	_ = req // avoid unused variable
-	return a.Formatter.Success(fmt.Sprintf("Cleared %d inbox items.", len(ids)))
+	cleared := len(ids) - failed
+	return a.Formatter.Success(fmt.Sprintf("Cleared %d of %d inbox items.", cleared, len(ids)))
 }
 
 // NowList lists current focus items (CRITICAL + OPPORTUNITY_NOW tasks for today).
@@ -417,25 +435,37 @@ func (a *App) ReviewDaily(ctx context.Context) error {
 		}
 		switch choice {
 		case "c":
-			_, _ = a.Client.CompleteTask(ctx, t.ID)
-			_ = a.Formatter.Println(fmt.Sprintf("  Completed: %s", t.Title))
-			processed++
+			if _, err := a.Client.CompleteTask(ctx, t.ID); err != nil {
+				_ = a.Formatter.Error(fmt.Sprintf("failed to complete task: %v", err))
+			} else {
+				_ = a.Formatter.Println(fmt.Sprintf("  Completed: %s", t.Title))
+				processed++
+			}
 		case "s":
-			_, _ = a.Client.UpdateTask(ctx, t.ID, api.UpdateTaskRequest{StartDate: tomorrow})
-			_ = a.Formatter.Println("  Snoozed to tomorrow.")
-			processed++
+			if _, err := a.Client.UpdateTask(ctx, t.ID, api.UpdateTaskRequest{StartDate: tomorrow}); err != nil {
+				_ = a.Formatter.Error(fmt.Sprintf("failed to snooze task: %v", err))
+			} else {
+				_ = a.Formatter.Println("  Snoozed to tomorrow.")
+				processed++
+			}
 		case "r":
 			_ = a.Formatter.Printf("  New date (YYYY-MM-DD): ")
 			var newDate string
 			if _, err := fmt.Scan(&newDate); err == nil && newDate != "" {
-				_, _ = a.Client.UpdateTask(ctx, t.ID, api.UpdateTaskRequest{StartDate: newDate})
-				_ = a.Formatter.Println(fmt.Sprintf("  Rescheduled to %s.", newDate))
-				processed++
+				if _, err := a.Client.UpdateTask(ctx, t.ID, api.UpdateTaskRequest{StartDate: newDate}); err != nil {
+					_ = a.Formatter.Error(fmt.Sprintf("failed to reschedule task: %v", err))
+				} else {
+					_ = a.Formatter.Println(fmt.Sprintf("  Rescheduled to %s.", newDate))
+					processed++
+				}
 			}
 		case "d":
-			_ = a.Client.DeleteTask(ctx, t.ID, false)
-			_ = a.Formatter.Println(fmt.Sprintf("  Deleted: %s", t.Title))
-			processed++
+			if err := a.Client.DeleteTask(ctx, t.ID, false); err != nil {
+				_ = a.Formatter.Error(fmt.Sprintf("failed to delete task: %v", err))
+			} else {
+				_ = a.Formatter.Println(fmt.Sprintf("  Deleted: %s", t.Title))
+				processed++
+			}
 		default:
 			_ = a.Formatter.Println("  Kept.")
 		}

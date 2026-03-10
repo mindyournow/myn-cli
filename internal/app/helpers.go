@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"time"
 
@@ -46,11 +45,3 @@ func (a *App) printTaskList(_ context.Context, tasks []api.UnifiedTask, emptyMsg
 	return nil
 }
 
-// fmtJSON marshals v as indented JSON and prints it.
-func (a *App) fmtJSON(v interface{}) error {
-	if a.Formatter.JSON {
-		return a.Formatter.Print(v)
-	}
-	// For non-JSON mode, use Println with a basic representation
-	return a.Formatter.Println(fmt.Sprintf("%v", v))
-}

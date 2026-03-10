@@ -44,7 +44,6 @@ type Model struct {
 	showNotifications  bool
 	searchScreen       screens.SearchScreen
 	notifScreen        screens.NotificationsScreen
-	keys               KeyMap
 	application        *app.App
 	screens            [screenCount]tea.Model
 }
@@ -59,7 +58,6 @@ func New(application *app.App) *Model {
 		tabBar:         components.NewTabBar(),
 		statusBar:      components.NewStatusBar(),
 		commandPalette: components.NewCommandPalette(),
-		keys:           DefaultKeyMap(),
 		application:    application,
 	}
 
@@ -150,7 +148,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			updated, cmd := m.searchScreen.Update(msg)
-			m.searchScreen = updated.(screens.SearchScreen)
+			if s, ok := updated.(screens.SearchScreen); ok {
+				m.searchScreen = s
+			}
 			cmds = append(cmds, cmd)
 			return m, tea.Batch(cmds...)
 		}
@@ -162,7 +162,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			updated, cmd := m.notifScreen.Update(msg)
-			m.notifScreen = updated.(screens.NotificationsScreen)
+			if s, ok := updated.(screens.NotificationsScreen); ok {
+				m.notifScreen = s
+			}
 			cmds = append(cmds, cmd)
 			return m, tea.Batch(cmds...)
 		}

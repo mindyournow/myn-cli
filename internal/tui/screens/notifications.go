@@ -103,6 +103,9 @@ func (s NotificationsScreen) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case notifsLoadedMsg:
 		s.notifications = msg.notifs
 		s.loading = false
+		if s.cursor >= len(s.notifications) {
+			s.cursor = max(0, len(s.notifications)-1)
+		}
 
 	case notifsErrMsg:
 		s.err = msg.err

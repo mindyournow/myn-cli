@@ -60,6 +60,10 @@ func (s TasksScreen) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tasksLoadedMsg:
 		s.tasks = msg.tasks
 		s.loading = false
+		nav := s.navigableItems()
+		if s.cursor >= len(nav) {
+			s.cursor = max(0, len(nav)-1)
+		}
 
 	case tasksErrMsg:
 		s.err = msg.err

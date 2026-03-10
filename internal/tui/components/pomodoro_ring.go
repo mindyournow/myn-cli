@@ -163,65 +163,12 @@ func (p PomodoroRing) View() string {
 	pctStr := fmt.Sprintf("%d%%", int(math.Round(p.progress*100)))
 	phaseStr := p.phaseLabel()
 
-	// Place center text in middle rows
+	// Build center label rows
 	centerRow := rows / 2
 	labelRow := centerRow - 1
 	pctRow := centerRow
-	_ = labelRow
 
-	// Render grid rows
-	var renderedRows []string
-	for ri := 0; ri < rows; ri++ {
-		var rowStr strings.Builder
-		for ci := 0; ci < cols; ci++ {
-			ch := grid[ri][ci]
-			switch ch {
-			case filled:
-				rowStr.WriteString(style.Render(ch))
-			case empty:
-				rowStr.WriteString(pomDimRingStyle.Render(ch))
-			default:
-				rowStr.WriteString(pomBgStyle2.Render(ch))
-			}
-		}
-		row := rowStr.String()
-
-		// Overlay center text
-		if ri == labelRow {
-			// Replace center chars with phase label
-			centerText := pomLabelStyle.Render(fmt.Sprintf(" %-9s ", phaseStr))
-			row = rowStr.String()
-			_ = centerText // rendered separately below
-		}
-		_ = pctRow
-
-		renderedRows = append(renderedRows, row)
-	}
-
-	// Overlay center labels directly into the rendered grid by rebuilding those rows
-	for _, ri := range []int{labelRow, pctRow} {
-		var rowStr strings.Builder
-		for ci := 0; ci < cols; ci++ {
-			ch := grid[ri][ci]
-			// Center columns 6-14 (9 chars wide)
-			if ci >= 6 && ci <= 14 {
-				// skip individual chars; we'll append center text after
-				rowStr.WriteString("")
-			} else {
-				switch ch {
-				case filled:
-					rowStr.WriteString(style.Render(ch))
-				case empty:
-					rowStr.WriteString(pomDimRingStyle.Render(ch))
-				default:
-					rowStr.WriteString(pomBgStyle2.Render(ch))
-				}
-			}
-		}
-		_ = rowStr
-	}
-
-	// Rebuild rows with center text overlay
+	// Render rows with center text overlay
 	finalRows := make([]string, rows)
 	for ri := 0; ri < rows; ri++ {
 		var rowStr strings.Builder

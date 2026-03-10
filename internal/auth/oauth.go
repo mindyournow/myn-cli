@@ -154,7 +154,7 @@ func (c *OAuthClient) RefreshToken(ctx context.Context, refreshToken string) (*T
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 		return nil, fmt.Errorf("token refresh failed: %s - %s", resp.Status, string(body))
 	}
 
@@ -207,7 +207,7 @@ func (c *OAuthClient) registerClient(ctx context.Context, redirectURI string) er
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 		return fmt.Errorf("client registration failed: %s - %s", resp.Status, string(respBody))
 	}
 
@@ -334,7 +334,7 @@ func (c *OAuthClient) exchangeCode(ctx context.Context, code, codeVerifier, redi
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 		return nil, fmt.Errorf("token exchange failed: %s - %s", resp.Status, string(body))
 	}
 

@@ -57,6 +57,10 @@ func (s TimersScreen) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case timersLoadedMsg:
 		s.timers = msg.timers
 		s.loading = false
+		active := s.activeTimers()
+		if s.cursor >= len(active) {
+			s.cursor = max(0, len(active)-1)
+		}
 
 	case timersErrMsg:
 		s.err = msg.err

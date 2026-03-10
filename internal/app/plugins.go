@@ -50,7 +50,19 @@ func (a *App) PluginRun(ctx context.Context, name string, args []string) error {
 		fmt.Fprintf(os.Stderr, "Note: no API key available for plugin\n")
 	}
 	if apiKey != "" {
-		cmd.Env = append(os.Environ(), "MYN_API_TOKEN="+apiKey)
+		// Whitelist only safe env vars — do not leak full os.Environ() to plugins.
+		allowed := map[string]bool{
+			"PATH": true, "HOME": true, "TERM": true, "TMPDIR": true,
+			"XDG_RUNTIME_DIR": true, "LANG": true, "USER": true,
+		}
+		safeEnv := []string{"MYN_API_TOKEN=" + apiKey}
+		for _, kv := range os.Environ() {
+			k := strings.SplitN(kv, "=", 2)[0]
+			if allowed[k] || strings.HasPrefix(k, "MYN_") {
+				safeEnv = append(safeEnv, kv)
+			}
+		}
+		cmd.Env = safeEnv
 	}
 	return cmd.Run()
 }

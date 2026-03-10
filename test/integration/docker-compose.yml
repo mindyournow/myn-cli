@@ -40,8 +40,8 @@ services:
       SPRING_DATA_REDIS_HOST: redis
       SPRING_DATA_REDIS_PORT: 6379
       SPRING_DATA_REDIS_DATABASE: 1
-      JWT_SECRET: dGVzdC1zZWNyZXQta2V5LWZvci1pbnRlZ3JhdGlvbi10ZXN0cw==
-      DEMO_API_KEY: test_demo_key
+      JWT_SECRET: ${MYN_TEST_JWT_SECRET:?MYN_TEST_JWT_SECRET must be set}
+      DEMO_API_KEY: ${MYN_TEST_DEMO_KEY:?MYN_TEST_DEMO_KEY must be set}
     ports:
       - "17000:5000"
     healthcheck:

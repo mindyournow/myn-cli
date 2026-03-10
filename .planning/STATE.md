@@ -1,67 +1,190 @@
 # Agent State: CLI-1
 
-## Specialist Feedback
+## Current Status: IN PROGRESS — Implementation Barely Begun
 
-- **[2026-03-09T22:56Z] review-agent → CHANGES-REQUESTED** — `.planning/feedback/001-review-agent-changes-requested.md`
-- **[2026-03-10T01:30Z] review-agent → CHANGES-REQUESTED** — `.planning/feedback/002-review-agent-changes-requested.md`
-- **[2026-03-10T01:32Z] review-agent → CHANGES-REQUESTED** — `.planning/feedback/003-review-agent-changes-requested.md`
+The previous agent (Kimi K2.5) built a solid scaffold and fixed 16 reviewer blockers,
+but only implemented OAuth PKCE. Everything else is stubs or missing.
+A comprehensive Opus 4.6 audit estimated ~5% of spec coverage.
 
-## Current Status
+**Model switch**: Implementation agent changed from kimi-k2.5 to claude-sonnet-4-6.
 
-**All 16 blockers have been addressed.**
+---
 
-### Fixes Applied:
+## Spec & PRD
 
-| Blocker | Fix |
-|---------|-----|
-| B1 (Zero tests) | Added 6 test files: config_test.go, keyring_test.go, oauth_test.go, auth_test.go, client_test.go, output_test.go, app_test.go |
-| B2 (math/rand) | OAuth PKCE now uses `crypto/rand` for code verifier and state generation |
-| B3 (Missing client_id) | Token exchange now includes `client_id` in form data for public clients |
-| B4 (Redirect URI mismatch) | Both registration and callback now use consistent `http://localhost:{port}/callback` |
-| B5 (Server never shut down) | `startCallbackServer()` returns server reference; `Shutdown()` called in defer |
-| B6 (Weak key derivation) | Now uses PBKDF2 with 100k iterations + 32-byte salt instead of single SHA-256 |
-| B7 (Dir permissions) | Credentials directory created with 0700 instead of 0755 |
-| B8 (URL parsing) | `url.Parse` error now checked and returned |
-| B9 (Retry POST) | Non-idempotent requests (POST) are not retried to avoid empty body issue |
-| B10 (Token save error) | `SaveRefreshToken` error now returned instead of ignored |
-| B11 (Clear dead code) | Fixed to properly collect and return errors in `Clear()` |
-| B12 (Global flags) | Wired via `PersistentPreRunE` that sets formatter on each command |
-| B13 (Help text) | Changed required args from `[arg]` to `<arg>` (e.g., `done <id>`) |
-| B14 (SilenceUsage) | Added `rootCmd.SilenceUsage = true` |
-| B15 (No context.Context) | All App methods now accept `context.Context` as first parameter |
-| B16 (Error-swallowing) | `config.Load()` and `app.New()` now return `(*T, error)` tuples |
+- **Spec**: `docs/MYN-TUI-CLI_SPEC.md` (4,500+ lines) — single source of truth
+- **Issue**: CLI-1 on GitHub (`github.com/mindyournow/myn-cli/issues/1`)
+- **Review**: `~/Projects/ReviewOfKimiMYNTUICode.md` — full Opus 4.6 code review
 
-### Files Modified:
-- `cmd/mynow/main.go`
-- `internal/config/config.go`
-- `internal/app/app.go`
-- `internal/api/client.go`
-- `internal/output/output.go`
+---
 
-### Files Created:
-- `internal/auth/oauth.go` + `oauth_test.go`
-- `internal/auth/keyring.go` + `keyring_test.go`
-- `internal/auth/auth_test.go`
-- `internal/config/config_test.go`
-- `internal/api/client_test.go`
-- `internal/output/output_test.go`
-- `internal/app/app_test.go`
+## What EXISTS (keep and build on)
 
-## Test Results
+| File | Status | Notes |
+|---|---|---|
+| `cmd/mynow/main.go` | Partial | Cobra root + 8 command groups wired. Missing: 25 command groups, --api-url, --debug flags |
+| `internal/api/client.go` | Good | Generic HTTP client with retry, rate limiting, context. Needs: 401 auto-refresh, response body size limit, Retry-After cap |
+| `internal/auth/oauth.go` | Good | Full OAuth PKCE flow, correct endpoints. Needs: server timeouts, 127.0.0.1 binding |
+| `internal/auth/keyring.go` | Needs Fix | AES-GCM + PBKDF2. Needs: fix weak key fallback (HIGH-1) |
+| `internal/auth/auth.go` | Good | TokenStore interface (SaveRefreshToken, LoadRefreshToken, Clear) |
+| `internal/config/config.go` | Partial | URL validation good. Needs: YAML config file, additional env vars |
+| `internal/output/output.go` | Partial | Text/JSON formatter. Needs: table, color, markdown (Glamour), progress |
+| `test/integration/setup.go` | Good | Docker Compose lifecycle |
+| `test/integration/docker-compose.yml` | Needs Fix | Hardcoded secrets (HIGH-2) |
+| Tests (7 files) | Mixed | client_test, oauth_test, keyring_test, config_test, output_test are solid. app_test is worthless stubs. |
 
-All tests pass:
-```
-ok  	github.com/mindyournow/myn-cli/internal/api	(cached)
-ok  	github.com/mindyournow/myn-cli/internal/app	(cached)
-ok  	github.com/mindyournow/myn-cli/internal/auth	(cached)
-ok  	github.com/mindyournow/myn-cli/internal/config	(cached)
-ok  	github.com/mindyournow/myn-cli/internal/output	(cached)
-```
+## What is MISSING (must build)
 
-## Additional Fixes
+### Architectural Bugs (do first — these affect correctness)
+- [ ] BUG-1: `app.go` methods return `Formatter.Error()` which returns nil — commands exit 0 on failure. Must return actual errors.
+- [ ] BUG-2: `Formatter.Error()` writes to stdout, not stderr (Spec §13.2 says "Errors go to stderr")
+- [ ] BUG-3: `app.New()` called before flag parsing in main.go — prevents `--api-url` flag from working. Must defer config loading to PersistentPreRunE.
 
-- Renamed `Response.UnmarshalJSON` to `DecodeJSON` to fix go vet warning about interface signature mismatch
+### Security Fixes (do first)
+- [ ] HIGH-1: Fix weak key derivation fallback in keyring.go
+- [ ] HIGH-2: Replace hardcoded secrets in docker-compose.yml with env var refs
+- [ ] MED-1: Add ReadTimeout/WriteTimeout to OAuth callback server
+- [ ] MED-2: Bind callback to 127.0.0.1:0 instead of localhost:0
+- [ ] MED-3: Sanitize errorParam in OAuth callback before printing
+- [ ] MED-4: Cap Retry-After to 60 seconds in client.go
+- [ ] MED-5: Add timeout to integration test HTTP client
+- [ ] LOW-1: Add io.LimitReader for response bodies in client.go
 
-## Remaining Work
+### Dependencies to Add
+- [ ] `go get github.com/charmbracelet/bubbletea` (TUI framework)
+- [ ] `go get github.com/charmbracelet/lipgloss` (TUI styling)
+- [ ] `go get github.com/charmbracelet/bubbles` (TUI components)
+- [ ] `go get github.com/charmbracelet/glamour` (markdown rendering)
+- [ ] `go get github.com/zalando/go-keyring` (OS keychain)
+- [ ] `go get gopkg.in/yaml.v3` (YAML config)
+- [ ] `go mod tidy` (fix x/crypto indirect annotation)
 
-None - all blockers addressed. Ready for re-review.
+### Auth (Spec §2)
+- [ ] `internal/auth/apikey.go` — API key storage + validation via GET /api/v1/customers
+- [ ] `internal/auth/device.go` — Device authorization flow (stub; backend doesn't support yet)
+- [ ] `internal/auth/tokens.go` — Token refresh, in-memory access token cache, 401 auto-refresh
+- [ ] GNOME Keyring / KDE Wallet integration via go-keyring
+- [ ] `login --api-key` command
+- [ ] `login --device` command
+- [ ] `whoami` command
+- [ ] `auth status` / `auth refresh` commands
+- [ ] `logout` — revoke via POST /api/mcp/oauth/logout
+
+### Config (Spec §3)
+- [ ] YAML config file support (`~/.config/mynow/config.yaml`)
+- [ ] All env vars: MYN_API_KEY, MYNOW_CONFIG, MYNOW_KEYRING, NO_COLOR, MYNOW_DEBUG
+- [ ] `config show/set/get/reset/path` commands
+
+### API Domain Layer (Spec §1.2, Appendix A — 22 files)
+- [ ] `internal/api/tasks.go` — /api/v2/unified-tasks (CRUD, complete, archive, batch, move)
+- [ ] `internal/api/habits.go` — /api/habits/chains, /api/habits/reminders, /api/v2/scheduling/habits
+- [ ] `internal/api/chores.go` — /api/v2/chores
+- [ ] `internal/api/compass.go` — /api/v2/compass
+- [ ] `internal/api/calendar.go` — /api/v2/calendar
+- [ ] `internal/api/timers.go` — /api/v2/timers
+- [ ] `internal/api/pomodoro.go` — /api/v1/pomodoro
+- [ ] `internal/api/lists.go` — /api/v1/households/.../grocery-list
+- [ ] `internal/api/projects.go` — /api/project
+- [ ] `internal/api/planning.go` — /api/ai/chat/stream + /api/v2/unified-tasks (client-side scheduling)
+- [ ] `internal/api/search.go` — /api/v2/search
+- [ ] `internal/api/profile.go` — /api/v1/customers
+- [ ] `internal/api/memory.go` — /api/v1/customers/memories
+- [ ] `internal/api/household.go` — /api/v1/households
+- [ ] `internal/api/comments.go` — /api/v2/unified-tasks/{id}/comments
+- [ ] `internal/api/sharing.go` — /api/v2/unified-tasks/{id}/share
+- [ ] `internal/api/notifications.go` — /api/v1/notifications
+- [ ] `internal/api/gamification.go` — /api/v1/gamification
+- [ ] `internal/api/export.go` — /api/v1/customers/exports
+- [ ] `internal/api/account.go` — /api/v1/account-deletion, /api/payments, /api/v1/usage
+- [ ] `internal/api/apikeys.go` — /api/v1/api-keys
+- [ ] `internal/api/ai.go` — /api/ai/chat/stream (SSE), /api/v1/ai/conversations
+
+### App Domain Layer (Spec §1.2, Appendix H — 24 files)
+- [ ] One file per domain (tasks.go, habits.go, etc.) replacing stubs in app.go
+- [ ] Each file calls domain API layer methods and formats output
+
+### CLI Commands (Spec §4.2-4.29 — 29 groups)
+The 4 existing stub groups (task, inbox, now, review) need real implementations.
+25 new groups must be created:
+- [ ] compass (show, generate, correct, complete, status, history)
+- [ ] habit (list, done, skip, streak, chains, schedule, reminders)
+- [ ] chore (list, done, schedule, rotation)
+- [ ] calendar (show, add, delete, decline, skip)
+- [ ] timer (list, start, pomodoro, alarm, cancel, snooze, pause, resume, complete, dismiss, count)
+- [ ] grocery (list, add, add-bulk, check, delete, clear, convert)
+- [ ] project (list, show, create)
+- [ ] plan / schedule / reschedule
+- [ ] search
+- [ ] whoami / goals / prefs (coaching, notifications, timers)
+- [ ] memory (list, show, add, update, search, delete, delete-all, export)
+- [ ] household (info, members, invite, leaderboard, challenges)
+- [ ] review weekly
+- [ ] task comment (list, add, edit, delete, count)
+- [ ] task share + shared-inbox
+- [ ] chore rotation (show, advance, reset, order)
+- [ ] notifications (list, unread, read, read-all, delete)
+- [ ] stats / stats pomodoro / stats usage
+- [ ] achievements (list, streaks, points, challenges)
+- [ ] export (request, list, download, delete, delete-batch)
+- [ ] account (info, usage, subscription, billing, delete, mcp-sessions)
+- [ ] apikey (list, create, show, update, revoke)
+- [ ] ai (chat, conversations CRUD)
+- [ ] timer pomodoro (smart, current, pause, resume, interrupt, suggest, stop, complete, history, settings)
+- [ ] config (show, set, get, reset, path)
+- [ ] completion (bash, zsh, fish) + man
+
+### Global Flags (Spec §4.1)
+- [ ] `--api-url` flag on root command
+- [ ] `--debug` flag on root command
+
+### Output (Spec §9 — 4 files)
+- [ ] `internal/output/table.go` — column-aligned tables
+- [ ] `internal/output/color.go` — ANSI color by priority zone (red/yellow/blue/gray), with --no-color
+- [ ] `internal/output/markdown.go` — Glamour rendering for compass, goals, comments
+- [ ] `internal/output/progress.go` — progress bars, SSE streaming display
+
+### TUI (Spec §5 — 20 screens, 16 components)
+- [ ] `internal/tui/app.go` — Root Bubble Tea model, screen router, tab management
+- [ ] 17 screen files in `internal/tui/screens/`
+- [ ] 16 component files in `internal/tui/components/`
+
+### Plugin System (Spec §10)
+- [ ] `plugins/plugin.go` — interface, loading, command injection
+- [ ] Plugin YAML state file support
+
+### Error Handling (Spec §13)
+- [ ] 6 exit codes (0=success, 1=general, 2=usage, 3=auth, 4=network, 5=API, 6=rate-limited)
+- [ ] JSON error wrapping
+- [ ] 401 auto-refresh middleware
+
+### Integration Tests (Spec §14 — 22 test files)
+- [ ] 21 missing test files (auth, tasks, habits, chores, calendar, compass, timers, pomodoro, grocery, projects, planning, search, profile, memory, household, review, comments, sharing, notifications, stats, achievements, export, account, apikeys, ai, cli_output)
+
+### Distribution (Spec §15)
+- [ ] `.goreleaser.yaml`
+- [ ] `.github/workflows/` CI pipeline
+- [ ] `go mod vendor` for reproducible builds
+
+---
+
+## Specialist Feedback History
+
+- **[2026-03-09T22:56Z] review-agent → CHANGES-REQUESTED** — 16 blockers in initial code
+- **[2026-03-10T01:30Z] review-agent → CHANGES-REQUESTED** — Incomplete scope, wrong OAuth paths
+- **[2026-03-10T01:32Z] review-agent → CHANGES-REQUESTED** — Security review findings
+- **[2026-03-10T02:00Z] Opus 4.6 audit** — Full spec audit: ~5% coverage, detailed gap analysis
+
+## Previous Fixes Applied (by Kimi agent)
+
+All 16 initial review blockers were addressed: B1-B16 (tests, crypto/rand, client_id,
+redirect URI, server shutdown, PBKDF2, dir perms, URL parsing, retry POST, token save,
+Clear dead code, global flags wiring, help text, SilenceUsage, context.Context, error returns).
+
+## Architecture Decisions (preserve these)
+
+1. `TokenStore` interface for swappable keyring backends
+2. `Formatter` interface for text/JSON output switching
+3. Retry-only-idempotent pattern in HTTP client
+4. PKCE listener-first-then-register flow (port consistency)
+5. Single binary providing both CLI and TUI modes
+6. `internal/` packages to minimize public API surface

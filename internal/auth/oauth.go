@@ -21,10 +21,10 @@ const (
 	codeVerifierLength = 128
 	stateLength        = 32
 
-	// OAuth endpoints
-	registerPath = "/oauth/register"
-	authPath     = "/oauth/authorize"
-	tokenPath    = "/oauth/token"
+	// OAuth endpoints (MYN backend paths)
+	registerPath = "/api/mcp/oauth/register"
+	authPath     = "/api/mcp/oauth/authorize"
+	tokenPath    = "/api/mcp/oauth/token"
 )
 
 // callbackResult holds the result of the OAuth callback.

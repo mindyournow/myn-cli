@@ -11,17 +11,20 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"time"
 
 	"golang.org/x/crypto/pbkdf2"
 )
 
 const (
 	// Encryption settings for PBKDF2
-	saltSize       = 32
-	keySize        = 32
-	iterations     = 100000
-	credentialsDir = "credentials"
-	tokenFile      = "refresh_token.enc"
+	saltSize        = 32
+	keySize         = 32
+	iterations      = 100000
+	credentialsDir  = "credentials"
+	tokenFile       = "refresh_token.enc"
+	clientIDFile    = "oauth_client_id"
+	accessTokenFile = "access_token.enc"
 )
 
 // Keyring provides secure storage for refresh tokens.
@@ -118,6 +121,69 @@ func (k *Keyring) LoadRefreshToken() (string, error) {
 	}
 
 	return token, nil
+}
+
+// SaveAccessToken encrypts and saves the access token with its expiry time.
+func (k *Keyring) SaveAccessToken(token string, expiresAt time.Time) error {
+	if token == "" {
+		return fmt.Errorf("token cannot be empty")
+	}
+	// Marshal token + expiry into JSON, then encrypt that
+	data, err := json.Marshal(accessTokenData{
+		Token:     token,
+		ExpiresAt: expiresAt.UTC().Format(time.RFC3339),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to marshal access token data: %w", err)
+	}
+	return k.saveRawCredential(accessTokenFile, string(data))
+}
+
+// LoadAccessToken loads the access token and its expiry from disk.
+// Returns empty string and zero time if not found or expired.
+func (k *Keyring) LoadAccessToken() (string, time.Time, error) {
+	raw, err := k.loadRawCredential(accessTokenFile)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	var data accessTokenData
+	if err := json.Unmarshal([]byte(raw), &data); err != nil {
+		return "", time.Time{}, fmt.Errorf("failed to unmarshal access token data: %w", err)
+	}
+	expiresAt, err := time.Parse(time.RFC3339, data.ExpiresAt)
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("failed to parse expiry: %w", err)
+	}
+	return data.Token, expiresAt, nil
+}
+
+type accessTokenData struct {
+	Token     string `json:"token"`
+	ExpiresAt string `json:"expires_at"`
+}
+
+// SaveClientID saves the OAuth client ID (plaintext, not secret).
+func (k *Keyring) SaveClientID(clientID string) error {
+	if clientID == "" {
+		return fmt.Errorf("client ID cannot be empty")
+	}
+	credDir := k.credDir()
+	if err := os.MkdirAll(credDir, 0700); err != nil {
+		return fmt.Errorf("failed to create credentials directory: %w", err)
+	}
+	return os.WriteFile(filepath.Join(credDir, clientIDFile), []byte(clientID), 0600)
+}
+
+// LoadClientID loads the saved OAuth client ID.
+func (k *Keyring) LoadClientID() (string, error) {
+	data, err := os.ReadFile(filepath.Join(k.credDir(), clientIDFile))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf("no client ID found")
+		}
+		return "", fmt.Errorf("failed to read client ID file: %w", err)
+	}
+	return string(data), nil
 }
 
 // Clear removes all stored credentials.

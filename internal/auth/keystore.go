@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"time"
 
 	gokeyring "github.com/zalando/go-keyring"
 )
@@ -80,6 +81,26 @@ func (k *KeyStore) LoadAPIKey() (string, error) {
 		}
 	}
 	return k.fileKeyring.loadRawCredential("api_key.enc")
+}
+
+// SaveAccessToken saves the access token with its expiry for cross-process use.
+func (k *KeyStore) SaveAccessToken(token string, expiresAt time.Time) error {
+	return k.fileKeyring.SaveAccessToken(token, expiresAt)
+}
+
+// LoadAccessToken loads the cached access token and its expiry.
+func (k *KeyStore) LoadAccessToken() (string, time.Time, error) {
+	return k.fileKeyring.LoadAccessToken()
+}
+
+// SaveClientID saves the OAuth client ID for use across processes.
+func (k *KeyStore) SaveClientID(clientID string) error {
+	return k.fileKeyring.SaveClientID(clientID)
+}
+
+// LoadClientID loads the saved OAuth client ID.
+func (k *KeyStore) LoadClientID() (string, error) {
+	return k.fileKeyring.LoadClientID()
 }
 
 // Clear removes all stored credentials from both stores.

@@ -230,6 +230,15 @@ func (c *OAuthClient) registerClient(ctx context.Context, redirectURI string) er
 	}
 
 	c.ClientID = result.ClientID
+
+	// Persist client_id so subsequent processes can use it for token refresh
+	if c.TokenStore != nil {
+		if saver, ok := c.TokenStore.(interface{ SaveClientID(string) error }); ok {
+			if err := saver.SaveClientID(result.ClientID); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to save client ID: %v\n", err)
+			}
+		}
+	}
 	return nil
 }
 

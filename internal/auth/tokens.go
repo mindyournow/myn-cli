@@ -25,6 +25,12 @@ func clampTTL(ttl int64) (time.Duration, bool) {
 	return time.Duration(ttl) * time.Second, false
 }
 
+// AccessTokenStore is an optional interface for persisting access tokens to disk.
+type AccessTokenStore interface {
+	SaveAccessToken(token string, expiresAt time.Time) error
+	LoadAccessToken() (string, time.Time, error)
+}
+
 // TokenCache holds the in-memory access token with its expiry time.
 // Thread-safe; multiple goroutines may call GetAccessToken concurrently.
 type TokenCache struct {
@@ -47,12 +53,22 @@ func NewTokenCache(store CredentialStore, oauthClient *OAuthClient) *TokenCache 
 }
 
 // SetAccessToken stores an access token with the given TTL.
+// Also persists to disk if the store supports it.
 func (tc *TokenCache) SetAccessToken(token string, expiresIn time.Duration) {
 	tc.mu.Lock()
 	defer tc.mu.Unlock()
 	tc.accessToken = token
 	// Subtract 60s buffer so we refresh before actual expiry
 	tc.expiresAt = time.Now().Add(expiresIn - 60*time.Second)
+
+	// Persist to disk for cross-process access (skip empty tokens)
+	if token != "" && tc.store != nil {
+		if ats, ok := tc.store.(AccessTokenStore); ok {
+			if err := ats.SaveAccessToken(token, tc.expiresAt); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to cache access token: %v\n", err)
+			}
+		}
+	}
 }
 
 // SetAuthMethod records which auth method is active.
@@ -87,6 +103,20 @@ func (tc *TokenCache) GetAccessToken(ctx context.Context) (string, error) {
 		tc.mu.RLock()
 		defer tc.mu.RUnlock()
 		return tc.accessToken, nil
+	}
+
+	// Try loading a cached access token from disk (cross-process persistence)
+	if tc.store != nil {
+		if ats, ok := tc.store.(AccessTokenStore); ok {
+			token, expiresAt, err := ats.LoadAccessToken()
+			if err == nil && token != "" && time.Now().Before(expiresAt) {
+				tc.mu.Lock()
+				tc.accessToken = token
+				tc.expiresAt = expiresAt
+				tc.mu.Unlock()
+				return token, nil
+			}
+		}
 	}
 
 	// Access token expired — refresh using the stored refresh token

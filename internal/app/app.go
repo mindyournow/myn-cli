@@ -37,6 +37,12 @@ func NewWithConfig(cfg *config.Config) *App {
 	fileKeyring := auth.NewKeyring(cfg.ConfigDir)
 	keyStore := auth.NewKeyStore(fileKeyring, cfg.Auth.Keyring)
 	oauthClient := auth.NewOAuthClient(cfg.BaseURL, keyStore)
+
+	// Load persisted client_id so token refresh works across processes
+	if clientID, err := keyStore.LoadClientID(); err == nil && clientID != "" {
+		oauthClient.ClientID = clientID
+	}
+
 	tokenCache := auth.NewTokenCache(keyStore, oauthClient)
 	client := api.NewClient(cfg.BaseURL)
 

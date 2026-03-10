@@ -134,7 +134,7 @@ func (s SearchScreen) View() string {
 	if s.loading {
 		rows = append(rows, dimStyle.Render("  Searching..."))
 	} else if s.err != nil {
-		rows = append(rows, errorStyle.Render(fmt.Sprintf("  Error: %v", s.err)))
+		rows = append(rows, formatError(s.err))
 	} else if len(s.results) == 0 && s.lastQuery != "" {
 		rows = append(rows, dimStyle.Render("  No results found."))
 	} else {

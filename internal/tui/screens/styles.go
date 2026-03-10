@@ -1,6 +1,7 @@
 package screens
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -18,6 +19,17 @@ var (
 	successStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("#22c55e"))
 	errorStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("#ef4444"))
 )
+
+// formatError returns a user-friendly error message.
+// Detects auth errors and shows login instructions instead of raw API responses.
+func formatError(err error) string {
+	if errors.Is(err, api.ErrUnauthorized) {
+		return errorStyle.Render("  Not authenticated") + "\n\n" +
+			dimStyle.Render("  Run 'mynow login' to authenticate, then relaunch the TUI.") + "\n" +
+			dimStyle.Render("  Press q to exit.")
+	}
+	return errorStyle.Render(fmt.Sprintf("  Error: %v", err))
+}
 
 // renderTaskDetail renders a task detail overlay panel.
 func renderTaskDetail(t *api.UnifiedTask, width int) string {

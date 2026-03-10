@@ -60,6 +60,10 @@ func (c *Client) getAPIKey() string {
 	return c.apiKey
 }
 
+// ErrUnauthorized is returned when the API responds with 401.
+// Callers can check errors.Is(err, ErrUnauthorized) to detect auth failures.
+var ErrUnauthorized = fmt.Errorf("not authenticated")
+
 // RequestOptions contains options for making HTTP requests.
 type RequestOptions struct {
 	Method      string
@@ -216,6 +220,9 @@ func (c *Client) DoRequest(ctx context.Context, opts RequestOptions) (*Response,
 		}
 
 		// Don't retry client errors (4xx)
+		if resp.StatusCode == http.StatusUnauthorized {
+			return nil, fmt.Errorf("%w — run 'mynow login' to authenticate", ErrUnauthorized)
+		}
 		if resp.StatusCode >= 400 && resp.StatusCode < 500 {
 			return nil, fmt.Errorf("request failed: %s - %s", resp.Status, string(body))
 		}

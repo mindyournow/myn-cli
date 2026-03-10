@@ -167,7 +167,7 @@ func (s NotificationsScreen) View() string {
 		return lipgloss.JoinVertical(lipgloss.Left, title, dimStyle.Render("  Loading..."))
 	}
 	if s.err != nil {
-		return lipgloss.JoinVertical(lipgloss.Left, title, errorStyle.Render(fmt.Sprintf("  Error: %v", s.err)))
+		return lipgloss.JoinVertical(lipgloss.Left, title, formatError(s.err))
 	}
 	if len(s.notifications) == 0 {
 		return lipgloss.JoinVertical(lipgloss.Left,

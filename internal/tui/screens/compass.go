@@ -176,7 +176,7 @@ func (s CompassScreen) View() string {
 	if s.loading {
 		rows = append(rows, dimStyle.Render("  Loading..."))
 	} else if s.err != nil {
-		rows = append(rows, errorStyle.Render(fmt.Sprintf("  Error: %v", s.err)))
+		rows = append(rows, formatError(s.err))
 	} else if s.briefing == nil {
 		rows = append(rows, dimStyle.Render("  No briefing available. Press G to generate."))
 	} else {

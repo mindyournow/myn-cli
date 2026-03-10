@@ -18,23 +18,25 @@ type App struct {
 	Formatter *output.Formatter
 }
 
-// New creates a new App instance.
+// New creates a new App instance using environment variables and defaults.
 // Returns an error if configuration cannot be loaded.
 func New() (*App, error) {
 	cfg, err := config.Load()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load config: %w", err)
 	}
+	return NewWithConfig(cfg), nil
+}
 
-	client := api.NewClient(cfg.BaseURL)
-	keyring := auth.NewKeyring(cfg.ConfigDir)
-
+// NewWithConfig creates an App from an already-loaded Config.
+// Used when flags (e.g., --api-url) override the loaded configuration (BUG-3 fix).
+func NewWithConfig(cfg *config.Config) *App {
 	return &App{
 		Config:    cfg,
-		Client:    client,
-		Keyring:   keyring,
+		Client:    api.NewClient(cfg.BaseURL),
+		Keyring:   auth.NewKeyring(cfg.ConfigDir),
 		Formatter: output.NewFormatter(false, false, false),
-	}, nil
+	}
 }
 
 // SetFormatter sets the output formatter for the app.
@@ -51,7 +53,9 @@ func (a *App) Login(ctx context.Context, device bool) error {
 	oauthClient := auth.NewOAuthClient(a.Config.BaseURL, a.Keyring)
 	tokens, err := oauthClient.Authenticate(ctx)
 	if err != nil {
-		return a.Formatter.Error(fmt.Sprintf("authentication failed: %v", err))
+		// Print to stderr and return the actual error (BUG-1 fix: don't swallow errors)
+		_ = a.Formatter.Error(fmt.Sprintf("authentication failed: %v", err))
+		return err
 	}
 
 	a.Client.SetToken(tokens.AccessToken)
@@ -61,7 +65,9 @@ func (a *App) Login(ctx context.Context, device bool) error {
 // Logout clears stored credentials.
 func (a *App) Logout(ctx context.Context) error {
 	if err := a.Keyring.Clear(); err != nil {
-		return a.Formatter.Error(fmt.Sprintf("failed to clear credentials: %v", err))
+		// Print to stderr and return the actual error (BUG-1 fix: don't swallow errors)
+		_ = a.Formatter.Error(fmt.Sprintf("failed to clear credentials: %v", err))
+		return err
 	}
 	a.Client.SetToken("")
 	return a.Formatter.Success("Logged out successfully.")

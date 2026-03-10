@@ -168,7 +168,7 @@ func (k *Keyring) deriveKey() ([]byte, []byte, error) {
 
 // machineSecret returns a machine-specific secret for key derivation.
 // On Linux, this attempts to use the D-Bus machine ID.
-// Falls back to a static fallback (less secure but functional).
+// Falls back to a randomly-generated per-machine key stored with 0600 permissions (HIGH-1 fix).
 func (k *Keyring) machineSecret() []byte {
 	// Try to get machine ID on Linux
 	if runtime.GOOS == "linux" {
@@ -182,16 +182,38 @@ func (k *Keyring) machineSecret() []byte {
 		}
 	}
 
-	// Fallback: use a combination of hostname and static salt
-	// This is less secure but ensures functionality
-	hostname, _ := os.Hostname()
-	if hostname == "" {
-		hostname = "unknown"
+	// Universal fallback: load or generate a random per-machine key file.
+	// This is cryptographically strong (unlike hostname-based derivation) and
+	// persists across CLI invocations so tokens remain decryptable.
+	return k.loadOrCreateMachineKey()
+}
+
+// loadOrCreateMachineKey loads an existing random machine key from disk, or
+// generates and stores a new one if none exists. The key file is stored with
+// 0600 permissions so only the owning user can read it (HIGH-1 fix).
+func (k *Keyring) loadOrCreateMachineKey() []byte {
+	keyFile := filepath.Join(k.credDir(), "machine.key")
+
+	// Try to load an existing 32-byte key
+	if data, err := os.ReadFile(keyFile); err == nil && len(data) == 32 {
+		return data
 	}
 
-	// Combine hostname with static fallback to ensure consistent key derivation
-	secret := sha256.Sum256([]byte(hostname + "|myn-cli-v1"))
-	return secret[:]
+	// Generate a new random 256-bit key
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		// Should never happen; last resort uses hostname hash for consistency
+		hostname, _ := os.Hostname()
+		h := sha256.Sum256([]byte(hostname + "|myn-cli-fallback-v2"))
+		return h[:]
+	}
+
+	// Persist the key so future decryption works
+	if err := os.MkdirAll(k.credDir(), 0700); err == nil {
+		_ = os.WriteFile(keyFile, key, 0600)
+	}
+
+	return key
 }
 
 type tokenFileData struct {

@@ -3,14 +3,25 @@ package integration
 import (
 	"encoding/json"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestDemoAccountFlow validates the demo account lifecycle that integration
 // tests depend on: create a demo account, get a token, use it to hit the API.
 func TestDemoAccountFlow(t *testing.T) {
 	EnsureBackend(t)
+
+	// Read demo API key from environment — never hardcode it (MED-5 fix: consistent with docker-compose.yml)
+	demoAPIKey := os.Getenv("MYN_TEST_DEMO_KEY")
+	if demoAPIKey == "" {
+		t.Fatal("MYN_TEST_DEMO_KEY environment variable must be set")
+	}
+
+	// Use a client with a timeout instead of http.DefaultClient (MED-5 fix)
+	httpClient := &http.Client{Timeout: 30 * time.Second}
 
 	baseURL := BackendURL()
 
@@ -19,9 +30,9 @@ func TestDemoAccountFlow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create request: %v", err)
 	}
-	req.Header.Set("X-Demo-API-Key", "test_demo_key")
+	req.Header.Set("X-Demo-API-Key", demoAPIKey)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		t.Fatalf("Failed to create demo account: %v", err)
 	}
@@ -53,7 +64,7 @@ func TestDemoAccountFlow(t *testing.T) {
 	}
 	taskReq.Header.Set("Authorization", "Bearer "+demoResp.Token)
 
-	taskResp, err := http.DefaultClient.Do(taskReq)
+	taskResp, err := httpClient.Do(taskReq)
 	if err != nil {
 		t.Fatalf("Failed to list tasks: %v", err)
 	}
@@ -75,7 +86,7 @@ func TestDemoAccountFlow(t *testing.T) {
 	createReq.Header.Set("Authorization", "Bearer "+demoResp.Token)
 	createReq.Header.Set("Content-Type", "application/json")
 
-	createResp, err := http.DefaultClient.Do(createReq)
+	createResp, err := httpClient.Do(createReq)
 	if err != nil {
 		t.Fatalf("Failed to create task: %v", err)
 	}

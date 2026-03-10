@@ -23,19 +23,32 @@ type Config struct {
 // Returns an error if the config directory cannot be determined or if
 // MYN_API_URL is invalid (HIGH-3 fix).
 func Load() (*Config, error) {
+	return LoadWithOverrides("")
+}
+
+// LoadWithOverrides loads config, optionally overriding the API URL (e.g., from --api-url flag).
+// An empty overrideURL means use MYN_API_URL env var or the default.
+func LoadWithOverrides(overrideURL string) (*Config, error) {
 	configDir, err := defaultConfigDir()
 	if err != nil {
 		return nil, fmt.Errorf("failed to determine config directory: %w", err)
 	}
 
-	baseURL := os.Getenv("MYN_API_URL")
+	baseURL := overrideURL
+	if baseURL == "" {
+		baseURL = os.Getenv("MYN_API_URL")
+	}
 	if baseURL == "" {
 		baseURL = DefaultBaseURL
 	}
 
 	// Validate URL to prevent SSRF/redirect attacks (HIGH-3 fix)
+	errLabel := "MYN_API_URL"
+	if overrideURL != "" {
+		errLabel = "--api-url"
+	}
 	if err := validateAPIURL(baseURL); err != nil {
-		return nil, fmt.Errorf("invalid MYN_API_URL: %w", err)
+		return nil, fmt.Errorf("invalid %s: %w", errLabel, err)
 	}
 
 	return &Config{

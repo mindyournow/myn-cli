@@ -78,13 +78,14 @@ func (c *OAuthClient) Authenticate(ctx context.Context) (*TokenResponse, error) 
 	}
 
 	// Get a listener for the callback server (we need this early for registration)
-	listener, err := net.Listen("tcp", "localhost:0")
+	// Bind explicitly to 127.0.0.1 (not "localhost") to avoid DNS-resolution ambiguity (MED-2 fix)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, fmt.Errorf("failed to create listener: %w", err)
 	}
 
 	port := listener.Addr().(*net.TCPAddr).Port
-	redirectURI := fmt.Sprintf("http://localhost:%d/callback", port)
+	redirectURI := fmt.Sprintf("http://127.0.0.1:%d/callback", port)
 
 	// Register the client if not already registered (passing the redirect URI)
 	if c.ClientID == "" {
@@ -253,8 +254,12 @@ func (c *OAuthClient) buildAuthURL(codeVerifier, state, redirectURI string) (str
 // Returns the server instance (for shutdown) and any error.
 func (c *OAuthClient) startCallbackServer(listener net.Listener, state, codeVerifier, redirectURI string) (*http.Server, error) {
 	mux := http.NewServeMux()
+	// Add timeouts to prevent slow-loris / hanging goroutines (MED-1 fix)
 	server := &http.Server{
-		Handler: mux,
+		Handler:      mux,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  60 * time.Second,
 	}
 
 	mux.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
@@ -263,7 +268,8 @@ func (c *OAuthClient) startCallbackServer(listener net.Listener, state, codeVeri
 		errorParam := r.URL.Query().Get("error")
 
 		if errorParam != "" {
-			c.callbackResult <- callbackResult{err: fmt.Errorf("oauth error: %s", errorParam)}
+			// Sanitize errorParam before using in error message to prevent ANSI injection (MED-3 fix)
+			c.callbackResult <- callbackResult{err: fmt.Errorf("oauth error: %s", sanitizeParam(errorParam))}
 			http.Error(w, "Authentication failed", http.StatusBadRequest)
 			return
 		}
@@ -363,6 +369,19 @@ func generateState() (string, error) {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(bytes), nil
+}
+
+// sanitizeParam strips non-printable characters from an OAuth callback parameter
+// to prevent terminal escape sequence injection (MED-3 fix).
+func sanitizeParam(s string) string {
+	out := make([]byte, 0, len(s))
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c >= 0x20 && c < 0x7f {
+			out = append(out, c)
+		}
+	}
+	return string(out)
 }
 
 // generateCodeChallenge generates the S256 code challenge from the verifier.

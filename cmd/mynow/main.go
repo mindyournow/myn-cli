@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/mindyournow/myn-cli/internal/app"
+	"github.com/mindyournow/myn-cli/internal/config"
 	"github.com/mindyournow/myn-cli/internal/output"
 	"github.com/spf13/cobra"
 )
@@ -16,16 +17,15 @@ var (
 )
 
 func main() {
-	application, err := app.New()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error initializing app: %v\n", err)
-		os.Exit(1)
-	}
+	// application is nil until PersistentPreRunE runs (BUG-3 fix: defer config loading to after flag parsing)
+	var application *app.App
 
 	var (
 		jsonFlag    bool
 		quietFlag   bool
 		noColorFlag bool
+		apiURLFlag  string
+		debugFlag   bool
 	)
 
 	rootCmd := &cobra.Command{
@@ -33,8 +33,14 @@ func main() {
 		Short: "Mind Your Now — CLI & TUI for MYN",
 		Long:  "A fast, scriptable, Linux-native terminal client for Mind Your Now.",
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-			// Wire the global flags to the formatter (B12 fix)
+			// Initialize the app here, after cobra has parsed all flags (BUG-3 fix)
+			cfg, err := config.LoadWithOverrides(apiURLFlag)
+			if err != nil {
+				return fmt.Errorf("configuration error: %w", err)
+			}
+			application = app.NewWithConfig(cfg)
 			application.SetFormatter(output.NewFormatter(jsonFlag, quietFlag, noColorFlag))
+			_ = debugFlag // TODO: wire debug flag to logger
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -46,22 +52,24 @@ func main() {
 	// Silence usage on errors (B14 fix)
 	rootCmd.SilenceUsage = true
 
-	rootCmd.AddCommand(
-		newVersionCmd(),
-		newLoginCmd(application),
-		newLogoutCmd(application),
-		newInboxCmd(application),
-		newNowCmd(application),
-		newTaskCmd(application),
-		newReviewCmd(application),
-		newTUICmd(application),
-		newPluginCmd(application),
-	)
-
-	// Global flags (B12 fix - wired to formatter via PersistentPreRunE)
+	// Global flags (Spec §4.1)
 	rootCmd.PersistentFlags().BoolVar(&jsonFlag, "json", false, "Output in JSON format")
 	rootCmd.PersistentFlags().BoolVar(&quietFlag, "quiet", false, "Suppress non-essential output")
 	rootCmd.PersistentFlags().BoolVar(&noColorFlag, "no-color", false, "Disable color output")
+	rootCmd.PersistentFlags().StringVar(&apiURLFlag, "api-url", "", "Override API base URL (default: https://api.mindyournow.com)")
+	rootCmd.PersistentFlags().BoolVar(&debugFlag, "debug", false, "Enable debug logging")
+
+	rootCmd.AddCommand(
+		newVersionCmd(),
+		newLoginCmd(&application),
+		newLogoutCmd(&application),
+		newInboxCmd(&application),
+		newNowCmd(&application),
+		newTaskCmd(&application),
+		newReviewCmd(&application),
+		newTUICmd(&application),
+		newPluginCmd(&application),
+	)
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
@@ -78,30 +86,30 @@ func newVersionCmd() *cobra.Command {
 	}
 }
 
-func newLoginCmd(a *app.App) *cobra.Command {
+func newLoginCmd(a **app.App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "login",
 		Short: "Authenticate with MYN backend",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			device, _ := cmd.Flags().GetBool("device")
-			return a.Login(cmd.Context(), device)
+			return (*a).Login(cmd.Context(), device)
 		},
 	}
 	cmd.Flags().Bool("device", false, "Use device authorization flow (headless environments)")
 	return cmd
 }
 
-func newLogoutCmd(a *app.App) *cobra.Command {
+func newLogoutCmd(a **app.App) *cobra.Command {
 	return &cobra.Command{
 		Use:   "logout",
 		Short: "Clear stored credentials",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return a.Logout(cmd.Context())
+			return (*a).Logout(cmd.Context())
 		},
 	}
 }
 
-func newInboxCmd(a *app.App) *cobra.Command {
+func newInboxCmd(a **app.App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "inbox",
 		Short: "Manage inbox items",
@@ -112,7 +120,7 @@ func newInboxCmd(a *app.App) *cobra.Command {
 		Short: "Add an item to the inbox",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return a.InboxAdd(cmd.Context(), args[0])
+			return (*a).InboxAdd(cmd.Context(), args[0])
 		},
 	})
 
@@ -120,14 +128,14 @@ func newInboxCmd(a *app.App) *cobra.Command {
 		Use:   "list",
 		Short: "List inbox items",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return a.InboxList(cmd.Context())
+			return (*a).InboxList(cmd.Context())
 		},
 	})
 
 	return cmd
 }
 
-func newNowCmd(a *app.App) *cobra.Command {
+func newNowCmd(a **app.App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "now",
 		Short: "Manage current focus",
@@ -137,7 +145,7 @@ func newNowCmd(a *app.App) *cobra.Command {
 		Use:   "list",
 		Short: "List current focus items",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return a.NowList(cmd.Context())
+			return (*a).NowList(cmd.Context())
 		},
 	})
 
@@ -145,14 +153,14 @@ func newNowCmd(a *app.App) *cobra.Command {
 		Use:   "focus",
 		Short: "Show or set current focus",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return a.NowFocus(cmd.Context())
+			return (*a).NowFocus(cmd.Context())
 		},
 	})
 
 	return cmd
 }
 
-func newTaskCmd(a *app.App) *cobra.Command {
+func newTaskCmd(a **app.App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "task",
 		Short: "Manage tasks",
@@ -163,7 +171,7 @@ func newTaskCmd(a *app.App) *cobra.Command {
 		Short: "Mark a task as done",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return a.TaskDone(cmd.Context(), args[0])
+			return (*a).TaskDone(cmd.Context(), args[0])
 		},
 	})
 
@@ -172,14 +180,14 @@ func newTaskCmd(a *app.App) *cobra.Command {
 		Short: "Snooze a task",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return a.TaskSnooze(cmd.Context(), args[0])
+			return (*a).TaskSnooze(cmd.Context(), args[0])
 		},
 	})
 
 	return cmd
 }
 
-func newReviewCmd(a *app.App) *cobra.Command {
+func newReviewCmd(a **app.App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "review",
 		Short: "Run review workflows",
@@ -189,24 +197,24 @@ func newReviewCmd(a *app.App) *cobra.Command {
 		Use:   "daily",
 		Short: "Run daily review",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return a.ReviewDaily(cmd.Context())
+			return (*a).ReviewDaily(cmd.Context())
 		},
 	})
 
 	return cmd
 }
 
-func newTUICmd(a *app.App) *cobra.Command {
+func newTUICmd(a **app.App) *cobra.Command {
 	return &cobra.Command{
 		Use:   "tui",
 		Short: "Launch interactive TUI",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return a.RunTUI(cmd.Context())
+			return (*a).RunTUI(cmd.Context())
 		},
 	}
 }
 
-func newPluginCmd(a *app.App) *cobra.Command {
+func newPluginCmd(a **app.App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "plugin",
 		Short: "Manage plugins",
@@ -216,7 +224,7 @@ func newPluginCmd(a *app.App) *cobra.Command {
 		Use:   "list",
 		Short: "List installed plugins",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return a.PluginList(cmd.Context())
+			return (*a).PluginList(cmd.Context())
 		},
 	})
 
@@ -225,7 +233,7 @@ func newPluginCmd(a *app.App) *cobra.Command {
 		Short: "Enable a plugin",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return a.PluginEnable(cmd.Context(), args[0])
+			return (*a).PluginEnable(cmd.Context(), args[0])
 		},
 	})
 

@@ -161,8 +161,8 @@ func (c *Client) DoRequest(ctx context.Context, opts RequestOptions) (*Response,
 			continue
 		}
 
-		// Read response body
-		body, err := io.ReadAll(resp.Body)
+		// Read response body with size limit to prevent memory exhaustion (LOW-1 fix)
+		body, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024)) // 10MB limit
 		resp.Body.Close()
 		if err != nil {
 			lastErr = fmt.Errorf("failed to read response body: %w", err)
@@ -182,9 +182,12 @@ func (c *Client) DoRequest(ctx context.Context, opts RequestOptions) (*Response,
 		if resp.StatusCode == http.StatusTooManyRequests {
 			retryAfter := resp.Header.Get("Retry-After")
 			if retryAfter != "" {
-				// Parse Retry-After as seconds
+				// Parse Retry-After as seconds; cap to 60s to prevent server-controlled DoS (MED-4 fix)
 				var seconds int
 				if _, err := fmt.Sscanf(retryAfter, "%d", &seconds); err == nil {
+					if seconds > 60 {
+						seconds = 60
+					}
 					select {
 					case <-ctx.Done():
 						return nil, ctx.Err()

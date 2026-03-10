@@ -12,25 +12,35 @@ type Formatter struct {
 	JSON    bool
 	Quiet   bool
 	NoColor bool
-	output  io.Writer
+	output    io.Writer // stdout for normal output
+	errOutput io.Writer // stderr for errors and warnings (BUG-2 fix)
 }
 
 // NewFormatter creates a new Formatter with the specified options.
+// Normal output goes to stdout; error/warning output goes to stderr (BUG-2 fix).
 func NewFormatter(json, quiet, noColor bool) *Formatter {
-	return NewFormatterWithWriter(os.Stdout, json, quiet, noColor)
-}
-
-// NewFormatterWithWriter creates a new Formatter with a custom writer.
-func NewFormatterWithWriter(w io.Writer, json, quiet, noColor bool) *Formatter {
 	return &Formatter{
-		JSON:    json,
-		Quiet:   quiet,
-		NoColor: noColor,
-		output:  w,
+		JSON:      json,
+		Quiet:     quiet,
+		NoColor:   noColor,
+		output:    os.Stdout,
+		errOutput: os.Stderr,
 	}
 }
 
-// SetWriter sets the output writer.
+// NewFormatterWithWriter creates a new Formatter with a custom writer.
+// Both stdout and stderr output are directed to the same writer (useful for testing).
+func NewFormatterWithWriter(w io.Writer, json, quiet, noColor bool) *Formatter {
+	return &Formatter{
+		JSON:      json,
+		Quiet:     quiet,
+		NoColor:   noColor,
+		output:    w,
+		errOutput: w,
+	}
+}
+
+// SetWriter sets the output writer for normal output.
 func (f *Formatter) SetWriter(w io.Writer) {
 	f.output = w
 }
@@ -96,7 +106,7 @@ func (f *Formatter) Success(msg string) error {
 	return err
 }
 
-// Error prints an error message.
+// Error prints an error message to stderr (BUG-2 fix: errors go to stderr per Spec §13.2).
 func (f *Formatter) Error(msg string) error {
 	if f.Quiet {
 		return nil
@@ -106,11 +116,11 @@ func (f *Formatter) Error(msg string) error {
 	} else {
 		msg = "Error: " + msg
 	}
-	_, err := fmt.Fprintln(f.output, msg)
+	_, err := fmt.Fprintln(f.errOutput, msg)
 	return err
 }
 
-// Warning prints a warning message.
+// Warning prints a warning message to stderr.
 func (f *Formatter) Warning(msg string) error {
 	if f.Quiet {
 		return nil
@@ -120,7 +130,7 @@ func (f *Formatter) Warning(msg string) error {
 	} else {
 		msg = "Warning: " + msg
 	}
-	_, err := fmt.Fprintln(f.output, msg)
+	_, err := fmt.Fprintln(f.errOutput, msg)
 	return err
 }
 

@@ -66,13 +66,6 @@ type TokenResponse struct {
 // Authenticate performs the full OAuth flow with PKCE.
 // It starts a local callback server, opens the browser, and exchanges the code for tokens.
 func (c *OAuthClient) Authenticate(ctx context.Context) (*TokenResponse, error) {
-	// Register the client if not already registered
-	if c.ClientID == "" {
-		if err := c.registerClient(ctx); err != nil {
-			return nil, fmt.Errorf("failed to register client: %w", err)
-		}
-	}
-
 	// Generate PKCE parameters using crypto/rand (not math/rand)
 	codeVerifier, err := generateCodeVerifier()
 	if err != nil {
@@ -84,8 +77,25 @@ func (c *OAuthClient) Authenticate(ctx context.Context) (*TokenResponse, error) 
 		return nil, fmt.Errorf("failed to generate state: %w", err)
 	}
 
-	// Start callback server
-	redirectURL, server, err := c.startCallbackServer(state, codeVerifier)
+	// Get a listener for the callback server (we need this early for registration)
+	listener, err := net.Listen("tcp", "localhost:0")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create listener: %w", err)
+	}
+
+	port := listener.Addr().(*net.TCPAddr).Port
+	redirectURI := fmt.Sprintf("http://localhost:%d/callback", port)
+
+	// Register the client if not already registered (passing the redirect URI)
+	if c.ClientID == "" {
+		if err := c.registerClient(ctx, redirectURI); err != nil {
+			listener.Close()
+			return nil, fmt.Errorf("failed to register client: %w", err)
+		}
+	}
+
+	// Start callback server using the SAME listener (B4 fix)
+	server, err := c.startCallbackServer(listener, state, codeVerifier, redirectURI)
 	if err != nil {
 		return nil, fmt.Errorf("failed to start callback server: %w", err)
 	}
@@ -97,7 +107,10 @@ func (c *OAuthClient) Authenticate(ctx context.Context) (*TokenResponse, error) 
 	}()
 
 	// Build and open authorization URL
-	authURL := c.buildAuthURL(codeVerifier, state, redirectURL)
+	authURL, err := c.buildAuthURL(codeVerifier, state, redirectURI)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build auth URL: %w", err)
+	}
 	fmt.Printf("Opening browser for authentication:\n%s\n", authURL)
 
 	// Wait for callback or context cancellation
@@ -160,18 +173,8 @@ func (c *OAuthClient) RefreshToken(ctx context.Context, refreshToken string) (*T
 }
 
 // registerClient dynamically registers this CLI as an OAuth client.
-func (c *OAuthClient) registerClient(ctx context.Context) error {
-	// Get an available port
-	listener, err := net.Listen("tcp", "localhost:0")
-	if err != nil {
-		return fmt.Errorf("failed to find available port: %w", err)
-	}
-	port := listener.Addr().(*net.TCPAddr).Port
-	listener.Close()
-
-	// Use the same redirect URI format that will be used in the actual flow (B4 fix)
-	redirectURI := fmt.Sprintf("http://localhost:%d/callback", port)
-
+// The redirectURI is now passed in to ensure consistency (B4 fix).
+func (c *OAuthClient) registerClient(ctx context.Context, redirectURI string) error {
 	registrationData := map[string]interface{}{
 		"client_name":   "MYN CLI",
 		"client_uri":    "https://github.com/mindyournow/myn-cli",
@@ -219,12 +222,20 @@ func (c *OAuthClient) registerClient(ctx context.Context) error {
 }
 
 // buildAuthURL constructs the authorization URL with PKCE parameters.
-func (c *OAuthClient) buildAuthURL(codeVerifier, state, redirectURI string) string {
+// Now returns an error instead of silently discarding them (B4/B8 fix).
+func (c *OAuthClient) buildAuthURL(codeVerifier, state, redirectURI string) (string, error) {
 	codeChallenge := generateCodeChallenge(codeVerifier)
 
-	authURL, _ := url.JoinPath(c.BaseURL, authPath)
+	authURL, err := url.JoinPath(c.BaseURL, authPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to build auth path: %w", err)
+	}
 
-	u, _ := url.Parse(authURL)
+	u, err := url.Parse(authURL)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse auth URL: %w", err)
+	}
+
 	q := u.Query()
 	q.Set("response_type", "code")
 	q.Set("client_id", c.ClientID)
@@ -234,20 +245,13 @@ func (c *OAuthClient) buildAuthURL(codeVerifier, state, redirectURI string) stri
 	q.Set("state", state)
 	u.RawQuery = q.Encode()
 
-	return u.String()
+	return u.String(), nil
 }
 
 // startCallbackServer starts an HTTP server to receive the OAuth callback.
-// Returns the redirect URL, the server instance (for shutdown), and any error.
-func (c *OAuthClient) startCallbackServer(state, codeVerifier string) (string, *http.Server, error) {
-	listener, err := net.Listen("tcp", "localhost:0")
-	if err != nil {
-		return "", nil, fmt.Errorf("failed to listen: %w", err)
-	}
-
-	port := listener.Addr().(*net.TCPAddr).Port
-	redirectURI := fmt.Sprintf("http://localhost:%d/callback", port)
-
+// Accepts a pre-created listener to ensure port consistency (B4 fix).
+// Returns the server instance (for shutdown) and any error.
+func (c *OAuthClient) startCallbackServer(listener net.Listener, state, codeVerifier, redirectURI string) (*http.Server, error) {
 	mux := http.NewServeMux()
 	server := &http.Server{
 		Handler: mux,
@@ -294,7 +298,7 @@ func (c *OAuthClient) startCallbackServer(state, codeVerifier string) (string, *
 		}
 	}()
 
-	return redirectURI, server, nil
+	return server, nil
 }
 
 // exchangeCode exchanges the authorization code for tokens.

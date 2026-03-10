@@ -126,7 +126,10 @@ func TestOAuthClient_buildAuthURL(t *testing.T) {
 	state := "test-state"
 	redirectURI := "http://localhost:8080/callback"
 
-	url := client.buildAuthURL(codeVerifier, state, redirectURI)
+	url, err := client.buildAuthURL(codeVerifier, state, redirectURI)
+	if err != nil {
+		t.Fatalf("buildAuthURL() error = %v", err)
+	}
 
 	// Verify URL contains all required parameters
 	if !strings.Contains(url, "response_type=code") {
@@ -146,6 +149,16 @@ func TestOAuthClient_buildAuthURL(t *testing.T) {
 	}
 	if !strings.Contains(url, "state=test-state") {
 		t.Error("URL should contain state")
+	}
+}
+
+func TestOAuthClient_buildAuthURL_InvalidBaseURL(t *testing.T) {
+	client := NewOAuthClient("://invalid-url", nil)
+	client.ClientID = "test-client-id"
+
+	_, err := client.buildAuthURL("verifier", "state", "http://localhost/callback")
+	if err == nil {
+		t.Error("buildAuthURL() should return error for invalid base URL")
 	}
 }
 
@@ -184,7 +197,7 @@ func TestOAuthClient_RegisterClient(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	err := client.registerClient(ctx)
+	err := client.registerClient(ctx, "http://localhost:8080/callback")
 	if err != nil {
 		t.Fatalf("registerClient() error = %v", err)
 	}

@@ -1,12 +1,25 @@
 # Agent State: CLI-1
 
-## Current Status: IN PROGRESS — Implementation Barely Begun
+## Current Status: Security Fixes + Dependency Setup COMPLETE — Ready for Re-Review
 
-The previous agent (Kimi K2.5) built a solid scaffold and fixed 16 reviewer blockers,
-but only implemented OAuth PKCE. Everything else is stubs or missing.
-A comprehensive Opus 4.6 audit estimated ~5% of spec coverage.
+claude-sonnet-4-6 addressed all security findings from 003-security-review.md and
+the three architectural bugs from STATE.md. All unit tests pass. Dependencies added.
+Branch pushed: feature/cli-1-clean (commit ed40349).
 
-**Model switch**: Implementation agent changed from kimi-k2.5 to claude-sonnet-4-6.
+**Completed in this session:**
+- HIGH-1: machineSecret() now uses random per-machine key file (0600) instead of hostname hash
+- HIGH-2: docker-compose.yml already fixed (env var refs) in prior commit
+- HIGH-3: config.go URL validation already fixed in prior commit
+- MED-1: OAuth callback server ReadTimeout/WriteTimeout/IdleTimeout added
+- MED-2: Callback listener binds to 127.0.0.1:0 (explicit loopback)
+- MED-3: errorParam sanitized before use in error message
+- MED-4: Retry-After header capped at 60 seconds
+- MED-5: Integration test uses custom HTTP client with 30s timeout, reads demo key from env
+- LOW-1: 10MB LimitReader on API response bodies
+- BUG-1: App methods return actual errors (not Formatter.Error() nil return)
+- BUG-2: Formatter.Error()/Warning() write to stderr (errOutput field)
+- BUG-3: App init deferred to PersistentPreRunE; --api-url and --debug flags added
+- CLI-36: Added bubbletea, lipgloss, bubbles, glamour, go-keyring, yaml.v3; go mod tidy
 
 ---
 
@@ -36,28 +49,28 @@ A comprehensive Opus 4.6 audit estimated ~5% of spec coverage.
 ## What is MISSING (must build)
 
 ### Architectural Bugs (do first — these affect correctness)
-- [ ] BUG-1: `app.go` methods return `Formatter.Error()` which returns nil — commands exit 0 on failure. Must return actual errors.
-- [ ] BUG-2: `Formatter.Error()` writes to stdout, not stderr (Spec §13.2 says "Errors go to stderr")
-- [ ] BUG-3: `app.New()` called before flag parsing in main.go — prevents `--api-url` flag from working. Must defer config loading to PersistentPreRunE.
+- [x] BUG-1: `app.go` methods return `Formatter.Error()` which returns nil — commands exit 0 on failure. Must return actual errors.
+- [x] BUG-2: `Formatter.Error()` writes to stdout, not stderr (Spec §13.2 says "Errors go to stderr")
+- [x] BUG-3: `app.New()` called before flag parsing in main.go — prevents `--api-url` flag from working. Must defer config loading to PersistentPreRunE.
 
 ### Security Fixes (do first)
-- [ ] HIGH-1: Fix weak key derivation fallback in keyring.go
-- [ ] HIGH-2: Replace hardcoded secrets in docker-compose.yml with env var refs
-- [ ] MED-1: Add ReadTimeout/WriteTimeout to OAuth callback server
-- [ ] MED-2: Bind callback to 127.0.0.1:0 instead of localhost:0
-- [ ] MED-3: Sanitize errorParam in OAuth callback before printing
-- [ ] MED-4: Cap Retry-After to 60 seconds in client.go
-- [ ] MED-5: Add timeout to integration test HTTP client
-- [ ] LOW-1: Add io.LimitReader for response bodies in client.go
+- [x] HIGH-1: Fix weak key derivation fallback in keyring.go
+- [x] HIGH-2: Replace hardcoded secrets in docker-compose.yml with env var refs
+- [x] MED-1: Add ReadTimeout/WriteTimeout to OAuth callback server
+- [x] MED-2: Bind callback to 127.0.0.1:0 instead of localhost:0
+- [x] MED-3: Sanitize errorParam in OAuth callback before printing
+- [x] MED-4: Cap Retry-After to 60 seconds in client.go
+- [x] MED-5: Add timeout to integration test HTTP client
+- [x] LOW-1: Add io.LimitReader for response bodies in client.go
 
 ### Dependencies to Add
-- [ ] `go get github.com/charmbracelet/bubbletea` (TUI framework)
-- [ ] `go get github.com/charmbracelet/lipgloss` (TUI styling)
-- [ ] `go get github.com/charmbracelet/bubbles` (TUI components)
-- [ ] `go get github.com/charmbracelet/glamour` (markdown rendering)
-- [ ] `go get github.com/zalando/go-keyring` (OS keychain)
-- [ ] `go get gopkg.in/yaml.v3` (YAML config)
-- [ ] `go mod tidy` (fix x/crypto indirect annotation)
+- [x] `go get github.com/charmbracelet/bubbletea` (TUI framework)
+- [x] `go get github.com/charmbracelet/lipgloss` (TUI styling)
+- [x] `go get github.com/charmbracelet/bubbles` (TUI components)
+- [x] `go get github.com/charmbracelet/glamour` (markdown rendering)
+- [x] `go get github.com/zalando/go-keyring` (OS keychain)
+- [x] `go get gopkg.in/yaml.v3` (YAML config)
+- [x] `go mod tidy` (fix x/crypto indirect annotation)
 
 ### Auth (Spec §2)
 - [ ] `internal/auth/apikey.go` — API key storage + validation via GET /api/v1/customers

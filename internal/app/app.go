@@ -38,10 +38,18 @@ func NewWithConfig(cfg *config.Config) *App {
 	keyStore := auth.NewKeyStore(fileKeyring, cfg.Auth.Keyring)
 	oauthClient := auth.NewOAuthClient(cfg.BaseURL, keyStore)
 	tokenCache := auth.NewTokenCache(keyStore, oauthClient)
+	client := api.NewClient(cfg.BaseURL)
+
+	// Hydrate the API client with stored credentials (API key or OAuth token).
+	if apiKey, err := keyStore.LoadAPIKey(); err == nil && apiKey != "" {
+		client.SetAPIKey(apiKey)
+	} else if token, err := tokenCache.GetAccessToken(context.Background()); err == nil && token != "" {
+		client.SetToken(token)
+	}
 
 	return &App{
 		Config:     cfg,
-		Client:     api.NewClient(cfg.BaseURL),
+		Client:     client,
 		Keyring:    fileKeyring,
 		KeyStore:   keyStore,
 		TokenCache: tokenCache,

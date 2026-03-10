@@ -194,33 +194,24 @@ func (a *App) AuthRefresh(ctx context.Context) error {
 }
 
 // InboxAdd adds an item to the inbox.
+// Inbox items are tasks with null priority — delegate to TaskAdd with no priority.
 func (a *App) InboxAdd(ctx context.Context, title string) error {
-	return a.Formatter.Printf("Inbox add not yet implemented: %s", title)
+	return a.TaskAdd(ctx, title, TaskAddOptions{})
 }
 
-// InboxList lists inbox items.
+// InboxList lists inbox items (tasks with null priority).
 func (a *App) InboxList(ctx context.Context) error {
-	return a.Formatter.Println("Inbox list not yet implemented.")
+	return a.TaskListFull(ctx, TaskListOptions{Priority: ""})
 }
 
-// NowList lists current focus items.
+// NowList lists current focus items (CRITICAL + OPPORTUNITY_NOW tasks for today).
 func (a *App) NowList(ctx context.Context) error {
-	return a.Formatter.Println("Now list not yet implemented.")
+	return a.TaskListFull(ctx, TaskListOptions{Today: true})
 }
 
-// NowFocus shows or sets current focus.
+// NowFocus shows or sets current focus (shows CRITICAL tasks).
 func (a *App) NowFocus(ctx context.Context) error {
-	return a.Formatter.Println("Now focus not yet implemented.")
-}
-
-// TaskDone marks a task as done.
-func (a *App) TaskDone(ctx context.Context, id string) error {
-	return a.Formatter.Printf("Task done not yet implemented: %s", id)
-}
-
-// TaskSnooze snoozes a task.
-func (a *App) TaskSnooze(ctx context.Context, id string) error {
-	return a.Formatter.Printf("Task snooze not yet implemented: %s", id)
+	return a.TaskListFull(ctx, TaskListOptions{Priority: "critical"})
 }
 
 // ReviewDaily runs the daily review.

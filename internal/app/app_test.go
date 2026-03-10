@@ -53,123 +53,86 @@ func TestApp_SetFormatter(t *testing.T) {
 	}
 }
 
-func TestApp_InboxAdd(t *testing.T) {
-	app, err := New()
+func TestApp_InboxAdd_RequiresAuth(t *testing.T) {
+	a, err := New()
 	if err != nil {
 		t.Skipf("Skipping: New() error = %v", err)
 	}
-
-	var buf bytes.Buffer
-	app.SetFormatter(output.NewFormatterWithWriter(&buf, false, false, true))
-
-	ctx := context.Background()
-	err = app.InboxAdd(ctx, "Test task")
-	if err != nil {
-		t.Fatalf("InboxAdd() error = %v", err)
-	}
-
-	if !strings.Contains(buf.String(), "Test task") {
-		t.Errorf("Output = %q, should contain 'Test task'", buf.String())
+	a.SetFormatter(output.NewFormatterWithWriter(&bytes.Buffer{}, false, false, true))
+	// Without credentials, InboxAdd should fail with auth or network error
+	err = a.InboxAdd(context.Background(), "Test task")
+	if err == nil {
+		t.Fatal("InboxAdd() without auth: expected error, got nil")
 	}
 }
 
-func TestApp_InboxList(t *testing.T) {
-	app, err := New()
+func TestApp_InboxList_RequiresAuth(t *testing.T) {
+	a, err := New()
 	if err != nil {
 		t.Skipf("Skipping: New() error = %v", err)
 	}
-
-	var buf bytes.Buffer
-	app.SetFormatter(output.NewFormatterWithWriter(&buf, false, false, true))
-
-	ctx := context.Background()
-	err = app.InboxList(ctx)
-	if err != nil {
-		t.Fatalf("InboxList() error = %v", err)
-	}
-
-	if buf.String() == "" {
-		t.Error("Output should not be empty")
+	a.SetFormatter(output.NewFormatterWithWriter(&bytes.Buffer{}, false, false, true))
+	err = a.InboxList(context.Background())
+	if err == nil {
+		t.Fatal("InboxList() without auth: expected error, got nil")
 	}
 }
 
-func TestApp_NowList(t *testing.T) {
-	app, err := New()
+func TestApp_NowList_RequiresAuth(t *testing.T) {
+	a, err := New()
 	if err != nil {
 		t.Skipf("Skipping: New() error = %v", err)
 	}
-
-	var buf bytes.Buffer
-	app.SetFormatter(output.NewFormatterWithWriter(&buf, false, false, true))
-
-	ctx := context.Background()
-	err = app.NowList(ctx)
-	if err != nil {
-		t.Fatalf("NowList() error = %v", err)
-	}
-
-	if buf.String() == "" {
-		t.Error("Output should not be empty")
+	a.SetFormatter(output.NewFormatterWithWriter(&bytes.Buffer{}, false, false, true))
+	err = a.NowList(context.Background())
+	if err == nil {
+		t.Fatal("NowList() without auth: expected error, got nil")
 	}
 }
 
-func TestApp_NowFocus(t *testing.T) {
-	app, err := New()
+func TestApp_NowFocus_RequiresAuth(t *testing.T) {
+	a, err := New()
 	if err != nil {
 		t.Skipf("Skipping: New() error = %v", err)
 	}
-
-	var buf bytes.Buffer
-	app.SetFormatter(output.NewFormatterWithWriter(&buf, false, false, true))
-
-	ctx := context.Background()
-	err = app.NowFocus(ctx)
-	if err != nil {
-		t.Fatalf("NowFocus() error = %v", err)
-	}
-
-	if buf.String() == "" {
-		t.Error("Output should not be empty")
+	a.SetFormatter(output.NewFormatterWithWriter(&bytes.Buffer{}, false, false, true))
+	err = a.NowFocus(context.Background())
+	if err == nil {
+		t.Fatal("NowFocus() without auth: expected error, got nil")
 	}
 }
 
-func TestApp_TaskDone(t *testing.T) {
-	app, err := New()
+func TestApp_TaskComplete_RequiresAuth(t *testing.T) {
+	a, err := New()
 	if err != nil {
 		t.Skipf("Skipping: New() error = %v", err)
 	}
 
 	var buf bytes.Buffer
-	app.SetFormatter(output.NewFormatterWithWriter(&buf, false, false, true))
+	a.SetFormatter(output.NewFormatterWithWriter(&buf, false, false, true))
 
+	// Without credentials, TaskComplete should return an auth error
 	ctx := context.Background()
-	err = app.TaskDone(ctx, "task-123")
-	if err != nil {
-		t.Fatalf("TaskDone() error = %v", err)
+	err = a.TaskComplete(ctx, "task-123")
+	if err == nil {
+		t.Fatal("TaskComplete() without auth: expected error, got nil")
 	}
-
-	if !strings.Contains(buf.String(), "task-123") {
-		t.Errorf("Output = %q, should contain 'task-123'", buf.String())
-	}
+	// Should be an auth error or network error (no backend available)
 }
 
-func TestApp_TaskSnooze(t *testing.T) {
-	app, err := New()
+func TestApp_TaskSnoozeTask_RequiresAuth(t *testing.T) {
+	a, err := New()
 	if err != nil {
 		t.Skipf("Skipping: New() error = %v", err)
 	}
 
 	var buf bytes.Buffer
-	app.SetFormatter(output.NewFormatterWithWriter(&buf, false, false, true))
+	a.SetFormatter(output.NewFormatterWithWriter(&buf, false, false, true))
 
 	ctx := context.Background()
-	err = app.TaskSnooze(ctx, "task-456")
-	if err != nil {
-		t.Fatalf("TaskSnooze() error = %v", err)
-	}
-
-	if !strings.Contains(buf.String(), "task-456") {
-		t.Errorf("Output = %q, should contain 'task-456'", buf.String())
+	err = a.TaskSnoozeTask(ctx, "task-456", TaskSnoozeOpt{})
+	if err == nil {
+		t.Fatal("TaskSnoozeTask() without auth: expected error, got nil")
 	}
 }
 

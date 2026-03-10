@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 )
 
 // Formatter handles CLI output in text or JSON format.
@@ -141,4 +142,45 @@ func (f *Formatter) Info(msg string) error {
 	}
 	_, err := fmt.Fprintln(f.output, msg)
 	return err
+}
+
+// NewTable creates a Table that writes to the formatter's output writer.
+func (f *Formatter) NewTable(headers ...string) *Table {
+	return NewTable(f.output, headers...)
+}
+
+// PrintMarkdown renders and prints markdown content.
+func (f *Formatter) PrintMarkdown(md string) error {
+	if f.Quiet {
+		return nil
+	}
+	rendered := RenderMarkdown(md, f.NoColor)
+	_, err := fmt.Fprint(f.output, rendered)
+	return err
+}
+
+// RelativeDate formats a time as a human-friendly relative string.
+// Examples: "just now", "2h ago", "yesterday", "Mar 7"
+func RelativeDate(t time.Time) string {
+	now := time.Now()
+	diff := now.Sub(t)
+	if diff < 0 {
+		diff = -diff
+	}
+	switch {
+	case diff < time.Minute:
+		return "just now"
+	case diff < time.Hour:
+		m := int(diff.Minutes())
+		return fmt.Sprintf("%dm ago", m)
+	case diff < 24*time.Hour:
+		h := int(diff.Hours())
+		return fmt.Sprintf("%dh ago", h)
+	case diff < 48*time.Hour:
+		return "yesterday"
+	case diff < 7*24*time.Hour:
+		return t.Format("Mon")
+	default:
+		return t.Format("Jan 2")
+	}
 }

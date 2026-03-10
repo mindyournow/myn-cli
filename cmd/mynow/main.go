@@ -6,6 +6,7 @@ import (
 
 	"github.com/mindyournow/myn-cli/internal/app"
 	"github.com/mindyournow/myn-cli/internal/config"
+	mynerrors "github.com/mindyournow/myn-cli/internal/errors"
 	"github.com/mindyournow/myn-cli/internal/output"
 	"github.com/spf13/cobra"
 )
@@ -75,7 +76,7 @@ func main() {
 	)
 
 	if err := rootCmd.Execute(); err != nil {
-		os.Exit(1)
+		os.Exit(mynerrors.ExitCode(err))
 	}
 }
 

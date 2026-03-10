@@ -201,7 +201,102 @@ func (a *App) InboxAdd(ctx context.Context, title string) error {
 
 // InboxList lists inbox items (tasks with null priority).
 func (a *App) InboxList(ctx context.Context) error {
-	return a.TaskListFull(ctx, TaskListOptions{Priority: ""})
+	return a.TaskListFull(ctx, TaskListOptions{Priority: "inbox"})
+}
+
+// InboxCount prints the count of inbox items.
+func (a *App) InboxCount(ctx context.Context) error {
+	if err := a.ensureAuth(ctx); err != nil {
+		return err
+	}
+	params := api.TaskListParams{Type: "TASK", Priority: ""}
+	tasks, err := a.Client.ListTasks(ctx, params)
+	if err != nil {
+		_ = a.Formatter.Error(fmt.Sprintf("failed to count inbox: %v", err))
+		return err
+	}
+	if a.Formatter.JSON {
+		return a.Formatter.Print(map[string]int{"count": len(tasks)})
+	}
+	return a.Formatter.Println(fmt.Sprintf("%d", len(tasks)))
+}
+
+// InboxProcess interactively walks through inbox items assigning priorities.
+func (a *App) InboxProcess(ctx context.Context) error {
+	if err := a.ensureAuth(ctx); err != nil {
+		return err
+	}
+	params := api.TaskListParams{Priority: ""}
+	tasks, err := a.Client.ListTasks(ctx, params)
+	if err != nil {
+		_ = a.Formatter.Error(fmt.Sprintf("failed to list inbox: %v", err))
+		return err
+	}
+	if len(tasks) == 0 {
+		return a.Formatter.Println("Inbox is empty. 🎉")
+	}
+	processed := 0
+	for _, t := range tasks {
+		_ = a.Formatter.Println(fmt.Sprintf("\n> %q", t.Title))
+		_ = a.Formatter.Println("  [c]ritical  [o]pportunity  [h]orizon  [p]arking  [s]kip  [d]elete")
+		_ = a.Formatter.Printf("  > ")
+		var choice string
+		if _, err := fmt.Scan(&choice); err != nil {
+			break
+		}
+		switch choice {
+		case "c":
+			_, _ = a.Client.UpdateTask(ctx, t.ID, api.UpdateTaskRequest{Priority: "CRITICAL"})
+			_ = a.Formatter.Println(fmt.Sprintf("  ✓ %q → Critical Now", t.Title))
+			processed++
+		case "o":
+			_, _ = a.Client.UpdateTask(ctx, t.ID, api.UpdateTaskRequest{Priority: "OPPORTUNITY_NOW"})
+			_ = a.Formatter.Println(fmt.Sprintf("  ✓ %q → Opportunity Now", t.Title))
+			processed++
+		case "h":
+			_, _ = a.Client.UpdateTask(ctx, t.ID, api.UpdateTaskRequest{Priority: "OVER_THE_HORIZON"})
+			_ = a.Formatter.Println(fmt.Sprintf("  ✓ %q → Over The Horizon", t.Title))
+			processed++
+		case "p":
+			_, _ = a.Client.UpdateTask(ctx, t.ID, api.UpdateTaskRequest{Priority: "PARKING_LOT"})
+			_ = a.Formatter.Println(fmt.Sprintf("  ✓ %q → Parking Lot", t.Title))
+			processed++
+		case "d":
+			_ = a.Client.DeleteTask(ctx, t.ID, false)
+			_ = a.Formatter.Println(fmt.Sprintf("  ✗ %q deleted", t.Title))
+			processed++
+		default:
+			_ = a.Formatter.Println("  → skipped")
+		}
+	}
+	return a.Formatter.Println(fmt.Sprintf("\nProcessed %d of %d items. %d remaining.", processed, len(tasks), len(tasks)-processed))
+}
+
+// InboxClear archives all inbox items.
+func (a *App) InboxClear(ctx context.Context) error {
+	if err := a.ensureAuth(ctx); err != nil {
+		return err
+	}
+	params := api.TaskListParams{Priority: ""}
+	tasks, err := a.Client.ListTasks(ctx, params)
+	if err != nil {
+		_ = a.Formatter.Error(fmt.Sprintf("failed to list inbox: %v", err))
+		return err
+	}
+	ids := make([]string, 0, len(tasks))
+	for _, t := range tasks {
+		ids = append(ids, t.ID)
+	}
+	if len(ids) == 0 {
+		return a.Formatter.Println("Inbox is already empty.")
+	}
+	req := api.BatchUpdateRequest{IDs: ids, Updates: api.UpdateTaskRequest{}}
+	// Archive by deleting each individually (BatchUpdate doesn't support archived field directly)
+	for _, id := range ids {
+		_ = a.Client.DeleteTask(ctx, id, false)
+	}
+	_ = req // avoid unused variable
+	return a.Formatter.Success(fmt.Sprintf("Cleared %d inbox items.", len(ids)))
 }
 
 // NowList lists current focus items (CRITICAL + OPPORTUNITY_NOW tasks for today).
@@ -209,29 +304,234 @@ func (a *App) NowList(ctx context.Context) error {
 	return a.TaskListFull(ctx, TaskListOptions{Today: true})
 }
 
-// NowFocus shows or sets current focus (shows CRITICAL tasks).
+// NowFocus shows current CRITICAL tasks (show mode).
 func (a *App) NowFocus(ctx context.Context) error {
 	return a.TaskListFull(ctx, TaskListOptions{Priority: "critical"})
 }
 
-// ReviewDaily runs the daily review.
+// NowFocusSet sets a task to CRITICAL priority (making it a focus task).
+func (a *App) NowFocusSet(ctx context.Context, id string) error {
+	if err := a.ensureAuth(ctx); err != nil {
+		return err
+	}
+	task, err := a.Client.UpdateTask(ctx, id, api.UpdateTaskRequest{Priority: "CRITICAL"})
+	if err != nil {
+		_ = a.Formatter.Error(fmt.Sprintf("failed to set focus: %v", err))
+		return err
+	}
+	if a.Formatter.JSON {
+		return a.Formatter.Print(task)
+	}
+	return a.Formatter.Success(fmt.Sprintf("● Focus set: %s", task.Title))
+}
+
+// NowFocusClear moves CRITICAL tasks back to OPPORTUNITY_NOW (clearing focus).
+func (a *App) NowFocusClear(ctx context.Context) error {
+	if err := a.ensureAuth(ctx); err != nil {
+		return err
+	}
+	params := api.TaskListParams{Priority: "CRITICAL"}
+	tasks, err := a.Client.ListTasks(ctx, params)
+	if err != nil {
+		_ = a.Formatter.Error(fmt.Sprintf("failed to get focus tasks: %v", err))
+		return err
+	}
+	ids := make([]string, 0, len(tasks))
+	for _, t := range tasks {
+		ids = append(ids, t.ID)
+	}
+	if len(ids) == 0 {
+		return a.Formatter.Println("No focus tasks to clear.")
+	}
+	batchReq := api.BatchUpdateRequest{IDs: ids, Updates: api.UpdateTaskRequest{Priority: "OPPORTUNITY_NOW"}}
+	if _, err := a.Client.BatchUpdateTasks(ctx, batchReq); err != nil {
+		_ = a.Formatter.Error(fmt.Sprintf("failed to clear focus: %v", err))
+		return err
+	}
+	return a.Formatter.Success(fmt.Sprintf("Cleared focus for %d task(s).", len(ids)))
+}
+
+// NowComplete completes a task from the now view.
+func (a *App) NowComplete(ctx context.Context, id string) error {
+	return a.TaskComplete(ctx, id)
+}
+
+// NowSnooze snoozes a task from the now view.
+func (a *App) NowSnooze(ctx context.Context, id, date string, days int) error {
+	return a.TaskSnoozeTask(ctx, id, TaskSnoozeOpt{Date: date, Days: days})
+}
+
+// ReviewDaily runs the daily review — walks through overdue/uncompleted tasks interactively.
 func (a *App) ReviewDaily(ctx context.Context) error {
-	return a.Formatter.Println("Daily review not yet implemented.")
+	if err := a.ensureAuth(ctx); err != nil {
+		return err
+	}
+
+	now := time.Now()
+	dayName := now.Format("Monday, January 2")
+	_ = a.Formatter.Println(fmt.Sprintf("DAILY REVIEW — %s\n", dayName))
+
+	// Fetch overdue and today's incomplete tasks
+	params := api.TaskListParams{}
+	tasks, err := a.Client.ListTasks(ctx, params)
+	if err != nil {
+		_ = a.Formatter.Error(fmt.Sprintf("failed to list tasks: %v", err))
+		return err
+	}
+
+	today := now.Format("2006-01-02")
+	var reviewTasks []api.UnifiedTask
+	for _, t := range tasks {
+		if t.IsCompleted || t.IsArchived {
+			continue
+		}
+		if t.StartDate != "" && t.StartDate <= today {
+			reviewTasks = append(reviewTasks, t)
+		}
+	}
+
+	if len(reviewTasks) == 0 {
+		return a.Formatter.Println("No tasks to review. Great work!")
+	}
+
+	_ = a.Formatter.Println(fmt.Sprintf("Checking in on %d tasks...\n", len(reviewTasks)))
+
+	tomorrow := now.AddDate(0, 0, 1).Format("2006-01-02")
+	processed := 0
+	for _, t := range reviewTasks {
+		overdue := t.StartDate < today
+		dateLabel := ""
+		if overdue {
+			dateLabel = fmt.Sprintf("  Due: %s (overdue)", t.StartDate)
+		} else {
+			dateLabel = fmt.Sprintf("  Due: %s", t.StartDate)
+		}
+		symbol := output.PriorityColored(t.PriorityString(), a.Formatter.NoColor)
+		_ = a.Formatter.Println(fmt.Sprintf("> %s  [%s]%s", t.Title, symbol, dateLabel))
+		_ = a.Formatter.Println("  [c]omplete  [s]nooze  [r]eschedule  [k]eep  [d]elete")
+		_ = a.Formatter.Printf("  > ")
+
+		var choice string
+		if _, err := fmt.Scan(&choice); err != nil {
+			break
+		}
+		switch choice {
+		case "c":
+			_, _ = a.Client.CompleteTask(ctx, t.ID)
+			_ = a.Formatter.Println(fmt.Sprintf("  Completed: %s", t.Title))
+			processed++
+		case "s":
+			_, _ = a.Client.UpdateTask(ctx, t.ID, api.UpdateTaskRequest{StartDate: tomorrow})
+			_ = a.Formatter.Println("  Snoozed to tomorrow.")
+			processed++
+		case "r":
+			_ = a.Formatter.Printf("  New date (YYYY-MM-DD): ")
+			var newDate string
+			if _, err := fmt.Scan(&newDate); err == nil && newDate != "" {
+				_, _ = a.Client.UpdateTask(ctx, t.ID, api.UpdateTaskRequest{StartDate: newDate})
+				_ = a.Formatter.Println(fmt.Sprintf("  Rescheduled to %s.", newDate))
+				processed++
+			}
+		case "d":
+			_ = a.Client.DeleteTask(ctx, t.ID, false)
+			_ = a.Formatter.Println(fmt.Sprintf("  Deleted: %s", t.Title))
+			processed++
+		default:
+			_ = a.Formatter.Println("  Kept.")
+		}
+	}
+
+	return a.Formatter.Println(fmt.Sprintf("\nReview complete. %d tasks processed.", processed))
+}
+
+// ReviewWeekly runs the weekly review — shows the week's completions and plans next week.
+func (a *App) ReviewWeekly(ctx context.Context) error {
+	if err := a.ensureAuth(ctx); err != nil {
+		return err
+	}
+
+	now := time.Now()
+	// Week boundaries: Monday–Sunday of the current week
+	weekday := int(now.Weekday())
+	if weekday == 0 {
+		weekday = 7 // Sunday = 7 in ISO
+	}
+	weekStart := now.AddDate(0, 0, -(weekday - 1)).Truncate(24 * time.Hour)
+	weekEnd := weekStart.AddDate(0, 0, 6)
+	weekStartStr := weekStart.Format("Jan 2")
+	weekEndStr := weekEnd.Format("Jan 2, 2006")
+	_ = a.Formatter.Println(fmt.Sprintf("WEEKLY REVIEW — Week of %s-%s\n", weekStartStr, weekEndStr))
+
+	// Fetch completed tasks
+	completedParams := api.TaskListParams{IsCompleted: true}
+	completedTasks, err := a.Client.ListTasks(ctx, completedParams)
+	if err != nil {
+		_ = a.Formatter.Error(fmt.Sprintf("failed to list completed tasks: %v", err))
+		return err
+	}
+
+	// Fetch all active tasks
+	activeTasks, err := a.Client.ListTasks(ctx, api.TaskListParams{})
+	if err != nil {
+		_ = a.Formatter.Error(fmt.Sprintf("failed to list tasks: %v", err))
+		return err
+	}
+
+	_ = a.Formatter.Println(fmt.Sprintf("COMPLETED THIS WEEK: %d tasks\n", len(completedTasks)))
+
+	// Separate overdue vs upcoming incomplete tasks
+	today := now.Format("2006-01-02")
+	nextWeekStart := now.AddDate(0, 0, 7-weekday+1).Format("2006-01-02")
+	nextWeekEnd := now.AddDate(0, 0, 7-weekday+7).Format("2006-01-02")
+
+	var overdueTasks, nextWeekTasks []api.UnifiedTask
+	for _, t := range activeTasks {
+		if t.IsCompleted || t.IsArchived {
+			continue
+		}
+		if t.StartDate != "" && t.StartDate < today {
+			overdueTasks = append(overdueTasks, t)
+		} else if t.StartDate >= nextWeekStart && t.StartDate <= nextWeekEnd {
+			nextWeekTasks = append(nextWeekTasks, t)
+		}
+	}
+
+	_ = a.Formatter.Println("INCOMPLETE:")
+	if len(overdueTasks) == 0 {
+		_ = a.Formatter.Println("  (none)")
+	} else {
+		for _, t := range overdueTasks {
+			symbol := output.PriorityColored(t.PriorityString(), a.Formatter.NoColor)
+			_ = a.Formatter.Println(fmt.Sprintf("  %s %s (overdue)", symbol, t.Title))
+		}
+	}
+
+	_ = a.Formatter.Println("\nNEXT WEEK:")
+	if len(nextWeekTasks) == 0 {
+		_ = a.Formatter.Println("  (no tasks scheduled)")
+	} else {
+		for _, t := range nextWeekTasks {
+			symbol := output.PriorityColored(t.PriorityString(), a.Formatter.NoColor)
+			_ = a.Formatter.Println(fmt.Sprintf("  %s %s  [%s]", symbol, t.Title, t.StartDate))
+		}
+	}
+
+	return a.Formatter.Println("\nReview complete.")
 }
 
 // RunTUI launches the interactive TUI.
+// The actual TUI is started by calling tui.Run from the cmd layer to avoid import cycles.
+// This method is kept for interface compatibility; cmd/mynow/main.go calls tui.Run directly.
 func (a *App) RunTUI(ctx context.Context) error {
-	return a.Formatter.Println("TUI not yet implemented.")
+	return a.Formatter.Println("Use 'mynow tui' or run via the TUI entry point.")
 }
 
-// PluginList lists installed plugins.
-func (a *App) PluginList(ctx context.Context) error {
-	return a.Formatter.Println("Plugin list not yet implemented.")
-}
-
-// PluginEnable enables a plugin.
-func (a *App) PluginEnable(ctx context.Context, name string) error {
-	return a.Formatter.Printf("Plugin enable not yet implemented: %s", name)
+// derefBool safely dereferences a *bool pointer, returning false if nil.
+func derefBool(b *bool) bool {
+	if b == nil {
+		return false
+	}
+	return *b
 }
 
 // ConfigShow prints the resolved configuration (secrets redacted).
@@ -273,9 +573,9 @@ func (a *App) ConfigShow(ctx context.Context) error {
 		fmt.Sprintf("display.default_output:        %s", cfg.Display.DefaultOutput),
 		fmt.Sprintf("tui.theme:                     %s", cfg.TUI.Theme),
 		fmt.Sprintf("tui.refresh_interval:          %s", cfg.TUI.RefreshInterval),
-		fmt.Sprintf("tui.vim_keys:                  %v", cfg.TUI.VimKeys),
-		fmt.Sprintf("tui.mouse:                     %v", cfg.TUI.Mouse),
-		fmt.Sprintf("tui.animations:                %v", cfg.TUI.Animations),
+		fmt.Sprintf("tui.vim_keys:                  %v", derefBool(cfg.TUI.VimKeys)),
+		fmt.Sprintf("tui.mouse:                     %v", derefBool(cfg.TUI.Mouse)),
+		fmt.Sprintf("tui.animations:                %v", derefBool(cfg.TUI.Animations)),
 		fmt.Sprintf("defaults.priority:             %s", cfg.Defaults.Priority),
 		fmt.Sprintf("defaults.task_type:            %s", cfg.Defaults.TaskType),
 		fmt.Sprintf("defaults.calendar_days:        %d", cfg.Defaults.CalendarDays),

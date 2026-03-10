@@ -2,6 +2,8 @@ package auth
 
 import (
 	"errors"
+	"fmt"
+	"os"
 
 	gokeyring "github.com/zalando/go-keyring"
 )
@@ -32,6 +34,8 @@ func (k *KeyStore) SaveRefreshToken(token string) error {
 	if k.useOSKeyring() {
 		if err := gokeyring.Set(KeyringService, KeyringAccountRefresh, token); err == nil {
 			return nil
+		} else {
+			fmt.Fprintf(os.Stderr, "Warning: OS keyring unavailable (%v), falling back to file store\n", err)
 		}
 	}
 	return k.fileKeyring.SaveRefreshToken(token)
@@ -57,6 +61,8 @@ func (k *KeyStore) SaveAPIKey(key string) error {
 	if k.useOSKeyring() {
 		if err := gokeyring.Set(KeyringService, KeyringAccountAPIKey, key); err == nil {
 			return nil
+		} else {
+			fmt.Fprintf(os.Stderr, "Warning: OS keyring unavailable (%v), falling back to file store\n", err)
 		}
 	}
 	return k.fileKeyring.saveRawCredential("api_key.enc", key)

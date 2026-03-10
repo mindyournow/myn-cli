@@ -4,7 +4,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
-	"unicode/utf8"
+
+	"github.com/mattn/go-runewidth"
 )
 
 // Table renders column-aligned text output.
@@ -40,14 +41,14 @@ func (t *Table) Render() {
 	}
 	widths := make([]int, cols)
 	for i, h := range t.headers {
-		if w := utf8.RuneCountInString(h); w > widths[i] {
+		if w := runewidth.StringWidth(h); w > widths[i] {
 			widths[i] = w
 		}
 	}
 	for _, row := range t.rows {
 		for i, cell := range row {
 			if i < cols {
-				if w := utf8.RuneCountInString(stripANSI(cell)); w > widths[i] {
+				if w := runewidth.StringWidth(stripANSI(cell)); w > widths[i] {
 					widths[i] = w
 				}
 			}
@@ -73,7 +74,7 @@ func printRow(w io.Writer, cells []string, widths []int, isHeader bool) {
 		if i < len(cells) {
 			cell = cells[i]
 		}
-		visible := utf8.RuneCountInString(stripANSI(cell))
+		visible := runewidth.StringWidth(stripANSI(cell))
 		pad := widths[i] - visible
 		if pad < 0 {
 			pad = 0
@@ -96,24 +97,30 @@ func printSeparator(w io.Writer, widths []int) {
 }
 
 // stripANSI removes ANSI escape sequences from s for width calculation.
+// Handles standard sequences as well as 256-color sequences like \033[38;5;196m.
 func stripANSI(s string) string {
-	var out strings.Builder
+	var result strings.Builder
 	i := 0
-	for i < len(s) {
-		if s[i] == '\033' && i+1 < len(s) && s[i+1] == '[' {
-			// skip until 'm'
-			j := i + 2
-			for j < len(s) && (s[j] < 'A' || s[j] > 'Z') && (s[j] < 'a' || s[j] > 'z') {
-				j++
+	runes := []rune(s)
+	for i < len(runes) {
+		if runes[i] == '\033' && i+1 < len(runes) && runes[i+1] == '[' {
+			i += 2
+			// Skip until we find the final byte (a letter a-z or A-Z)
+			for i < len(runes) && !isANSIFinal(runes[i]) {
+				i++
 			}
-			if j < len(s) {
-				j++ // skip the final letter
+			if i < len(runes) {
+				i++ // skip the final byte too
 			}
-			i = j
-		} else {
-			out.WriteByte(s[i])
-			i++
+			continue
 		}
+		result.WriteRune(runes[i])
+		i++
 	}
-	return out.String()
+	return result.String()
+}
+
+// isANSIFinal returns true if r is a valid ANSI escape sequence final byte (a letter).
+func isANSIFinal(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')
 }

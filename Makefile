@@ -1,4 +1,4 @@
-.PHONY: build run test test-integration lint clean
+.PHONY: build run test test-integration lint clean release-snapshot release-check
 
 BINARY := mynow
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -23,3 +23,9 @@ lint:
 
 clean:
 	rm -rf bin/ dist/
+
+release-snapshot:
+	goreleaser release --snapshot --clean
+
+release-check:
+	goreleaser check

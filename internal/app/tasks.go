@@ -286,6 +286,22 @@ func (a *App) TaskDelete(ctx context.Context, id string, permanent bool) error {
 	return a.Formatter.Success(fmt.Sprintf("Deleted task %s (restorable with 'task restore')", id))
 }
 
+// TaskArchive archives a task.
+func (a *App) TaskArchive(ctx context.Context, id string) error {
+	if err := a.ensureAuth(ctx); err != nil {
+		return err
+	}
+	task, err := a.Client.ArchiveTask(ctx, id)
+	if err != nil {
+		_ = a.Formatter.Error(fmt.Sprintf("failed to archive task: %v", err))
+		return err
+	}
+	if a.Formatter.JSON {
+		return a.Formatter.Print(task)
+	}
+	return a.Formatter.Success(fmt.Sprintf("Task archived: %s", task.Title))
+}
+
 // TaskRestore restores a soft-deleted task.
 func (a *App) TaskRestore(ctx context.Context, id string) error {
 	if err := a.ensureAuth(ctx); err != nil {

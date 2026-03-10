@@ -133,6 +133,38 @@ func (a *App) TimerDismiss(ctx context.Context) error {
 	return a.Formatter.Success("All completed timers dismissed.")
 }
 
+// TimerCancel cancels a timer.
+func (a *App) TimerCancel(ctx context.Context, id string) error {
+	if err := a.ensureAuth(ctx); err != nil {
+		return err
+	}
+	timer, err := a.Client.CancelTimer(ctx, id)
+	if err != nil {
+		_ = a.Formatter.Error(fmt.Sprintf("failed to cancel timer: %v", err))
+		return err
+	}
+	if a.Formatter.JSON {
+		return a.Formatter.Print(timer)
+	}
+	return a.Formatter.Success(fmt.Sprintf("Timer cancelled: %s", timer.ID))
+}
+
+// TimerSnooze snoozes a completed timer.
+func (a *App) TimerSnooze(ctx context.Context, id string, minutes int) error {
+	if err := a.ensureAuth(ctx); err != nil {
+		return err
+	}
+	timer, err := a.Client.SnoozeTimer(ctx, id, minutes)
+	if err != nil {
+		_ = a.Formatter.Error(fmt.Sprintf("failed to snooze timer: %v", err))
+		return err
+	}
+	if a.Formatter.JSON {
+		return a.Formatter.Print(timer)
+	}
+	return a.Formatter.Success(fmt.Sprintf("Timer snoozed %d min: %s", minutes, timer.ID))
+}
+
 // TimerCount shows the number of active timers.
 func (a *App) TimerCount(ctx context.Context) error {
 	if err := a.ensureAuth(ctx); err != nil {

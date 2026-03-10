@@ -116,6 +116,33 @@ func (c *Client) DismissCompletedTimers(ctx context.Context) error {
 	return err
 }
 
+// CancelTimer cancels an active timer.
+func (c *Client) CancelTimer(ctx context.Context, id string) (*Timer, error) {
+	resp, err := c.Post(ctx, "/api/v2/timers/"+id+"/cancel", nil)
+	if err != nil {
+		return nil, err
+	}
+	var timer Timer
+	if err := resp.DecodeJSON(&timer); err != nil {
+		return nil, fmt.Errorf("failed to parse cancelled timer: %w", err)
+	}
+	return &timer, nil
+}
+
+// SnoozeTimer snoozes a completed timer for additional minutes.
+func (c *Client) SnoozeTimer(ctx context.Context, id string, snoozeMinutes int) (*Timer, error) {
+	resp, err := c.Post(ctx, "/api/v2/timers/"+id+"/snooze",
+		map[string]int{"snoozeMinutes": snoozeMinutes})
+	if err != nil {
+		return nil, err
+	}
+	var timer Timer
+	if err := resp.DecodeJSON(&timer); err != nil {
+		return nil, fmt.Errorf("failed to parse snoozed timer: %w", err)
+	}
+	return &timer, nil
+}
+
 // GetTimerCount returns the number of active timers.
 func (c *Client) GetTimerCount(ctx context.Context) (int, error) {
 	resp, err := c.Get(ctx, "/api/v2/timers/count", nil)

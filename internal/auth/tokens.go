@@ -3,9 +3,27 @@ package auth
 import (
 	"context"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 )
+
+const (
+	minTokenTTL = 60    // 1 minute
+	maxTokenTTL = 86400 // 24 hours
+)
+
+// clampTTL returns a safe TTL in seconds.
+// The second return value is true if clamping occurred.
+func clampTTL(ttl int64) (time.Duration, bool) {
+	if ttl < minTokenTTL {
+		return time.Duration(minTokenTTL) * time.Second, true
+	}
+	if ttl > maxTokenTTL {
+		return time.Duration(maxTokenTTL) * time.Second, true
+	}
+	return time.Duration(ttl) * time.Second, false
+}
 
 // TokenCache holds the in-memory access token with its expiry time.
 // Thread-safe; multiple goroutines may call GetAccessToken concurrently.
@@ -91,9 +109,13 @@ func (tc *TokenCache) Refresh(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("token refresh failed: %w", err)
 	}
 
-	ttl := time.Duration(resp.ExpiresIn) * time.Second
-	if ttl <= 0 {
-		ttl = 3600 * time.Second
+	expiresIn := int64(resp.ExpiresIn)
+	if expiresIn <= 0 {
+		expiresIn = 3600
+	}
+	ttl, clamped := clampTTL(expiresIn)
+	if clamped {
+		fmt.Fprintf(os.Stderr, "Warning: token expires_in %d clamped to %v\n", expiresIn, ttl)
 	}
 	tc.SetAccessToken(resp.AccessToken, ttl)
 	return resp.AccessToken, nil

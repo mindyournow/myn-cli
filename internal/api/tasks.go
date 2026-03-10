@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"time"
 )
 
 // UnifiedTask represents a task from the MYN backend.
@@ -75,6 +76,15 @@ func (c *Client) ListTasks(ctx context.Context, p TaskListParams) ([]UnifiedTask
 	}
 	if p.Page > 0 {
 		params["page"] = fmt.Sprintf("%d", p.Page)
+	}
+	if p.Priority != "" {
+		params["priority"] = p.Priority
+	}
+	if p.Today {
+		params["date"] = time.Now().Format("2006-01-02")
+	}
+	if p.Overdue {
+		params["overdue"] = "true"
 	}
 
 	resp, err := c.Get(ctx, path, params)
@@ -188,6 +198,19 @@ func (c *Client) DeleteTask(ctx context.Context, id string, permanent bool) erro
 	}
 	_, err := c.Delete(ctx, path)
 	return err
+}
+
+// ArchiveTask archives a task (soft archive, not deletion).
+func (c *Client) ArchiveTask(ctx context.Context, id string) (*UnifiedTask, error) {
+	resp, err := c.Post(ctx, "/api/v2/unified-tasks/"+id+"/archive", nil)
+	if err != nil {
+		return nil, err
+	}
+	var task UnifiedTask
+	if err := resp.DecodeJSON(&task); err != nil {
+		return nil, fmt.Errorf("failed to parse archived task: %w", err)
+	}
+	return &task, nil
 }
 
 // RestoreTask restores a soft-deleted task.

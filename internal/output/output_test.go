@@ -76,7 +76,7 @@ func TestFormatter_Printf(t *testing.T) {
 	var buf bytes.Buffer
 	f := NewFormatterWithWriter(&buf, false, false, false)
 
-	err := f.Printf("Hello %s, number %d", "world", 42)
+	err := f.Printf("Hello %s, number %d\n", "world", 42)
 	if err != nil {
 		t.Fatalf("Printf() error = %v", err)
 	}

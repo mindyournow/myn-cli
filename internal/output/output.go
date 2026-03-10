@@ -46,6 +46,11 @@ func (f *Formatter) SetWriter(w io.Writer) {
 	f.output = w
 }
 
+// Writer returns the output writer.
+func (f *Formatter) Writer() io.Writer {
+	return f.output
+}
+
 // Print outputs data in the configured format.
 // Returns an error if JSON encoding fails.
 func (f *Formatter) Print(data any) error {
@@ -71,7 +76,7 @@ func (f *Formatter) Printf(format string, args ...any) error {
 	if f.Quiet {
 		return nil
 	}
-	_, err := fmt.Fprintf(f.output, format+"\n", args...)
+	_, err := fmt.Fprintf(f.output, format, args...)
 	return err
 }
 

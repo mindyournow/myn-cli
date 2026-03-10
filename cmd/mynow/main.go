@@ -9,7 +9,9 @@ import (
 	"github.com/mindyournow/myn-cli/internal/config"
 	mynerrors "github.com/mindyournow/myn-cli/internal/errors"
 	"github.com/mindyournow/myn-cli/internal/output"
+	"github.com/mindyournow/myn-cli/internal/tui"
 	"github.com/spf13/cobra"
+	"github.com/spf13/cobra/doc"
 )
 
 var (
@@ -47,7 +49,7 @@ func main() {
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Default action: launch TUI
-			return application.RunTUI(cmd.Context())
+			return tui.Run(application)
 		},
 	}
 
@@ -83,6 +85,22 @@ func main() {
 		newProfileCmd(&application),
 		newMemoryCmd(&application),
 		newHouseholdCmd(&application),
+		newPlanCmd(&application),
+		newScheduleCmd(&application),
+		newRescheduleCmd(&application),
+		newHabitCmd(&application),
+		newChoreCmd(&application),
+		newNotificationCmd(&application),
+		newStatsCmd(&application),
+		newAPIKeyCmd(&application),
+		newExportCmd(&application),
+		newAccountCmd(&application),
+		newAICmd(&application),
+		newPomodoroCmd(&application),
+		newCommentCmd(&application),
+		newCompletionCmd(),
+		newSharedInboxCmd(&application),
+		newManCmd(),
 	)
 
 	if err := rootCmd.Execute(); err != nil {
@@ -169,6 +187,9 @@ func newInboxCmd(a **app.App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "inbox",
 		Short: "Manage inbox items",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).InboxList(cmd.Context())
+		},
 	}
 
 	cmd.AddCommand(&cobra.Command{
@@ -188,13 +209,40 @@ func newInboxCmd(a **app.App) *cobra.Command {
 		},
 	})
 
+	cmd.AddCommand(&cobra.Command{
+		Use:   "count",
+		Short: "Show inbox item count",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).InboxCount(cmd.Context())
+		},
+	})
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "process",
+		Short: "Interactively assign priorities to inbox items",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).InboxProcess(cmd.Context())
+		},
+	})
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "clear",
+		Short: "Archive all inbox items",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).InboxClear(cmd.Context())
+		},
+	})
+
 	return cmd
 }
 
 func newNowCmd(a **app.App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "now",
-		Short: "Manage current focus",
+		Short: "Current focus — critical tasks, calendar, habits due",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).NowList(cmd.Context())
+		},
 	}
 
 	cmd.AddCommand(&cobra.Command{
@@ -205,13 +253,45 @@ func newNowCmd(a **app.App) *cobra.Command {
 		},
 	})
 
-	cmd.AddCommand(&cobra.Command{
-		Use:   "focus",
-		Short: "Show or set current focus",
+	focusCmd := &cobra.Command{
+		Use:   "focus [id]",
+		Short: "Show or set current focus task",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			clear, _ := cmd.Flags().GetBool("clear")
+			if clear {
+				return (*a).NowFocusClear(cmd.Context())
+			}
+			if len(args) > 0 {
+				return (*a).NowFocusSet(cmd.Context(), args[0])
+			}
 			return (*a).NowFocus(cmd.Context())
 		},
+	}
+	focusCmd.Flags().Bool("clear", false, "Clear current focus")
+	cmd.AddCommand(focusCmd)
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "complete <id>",
+		Short: "Mark a focus task as done",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).NowComplete(cmd.Context(), args[0])
+		},
 	})
+
+	snoozeCmd := &cobra.Command{
+		Use:   "snooze <id>",
+		Short: "Snooze a focus task",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			date, _ := cmd.Flags().GetString("date")
+			days, _ := cmd.Flags().GetInt("days")
+			return (*a).NowSnooze(cmd.Context(), args[0], date, days)
+		},
+	}
+	snoozeCmd.Flags().String("date", "", "Target date")
+	snoozeCmd.Flags().Int("days", 1, "Snooze by N days")
+	cmd.AddCommand(snoozeCmd)
 
 	return cmd
 }
@@ -413,6 +493,16 @@ func newTaskCmd(a **app.App) *cobra.Command {
 		},
 	})
 
+	// task archive
+	cmd.AddCommand(&cobra.Command{
+		Use:   "archive <id>",
+		Short: "Archive a task",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).TaskArchive(cmd.Context(), args[0])
+		},
+	})
+
 	return cmd
 }
 
@@ -440,6 +530,14 @@ func newReviewCmd(a **app.App) *cobra.Command {
 		Short: "Run daily review",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return (*a).ReviewDaily(cmd.Context())
+		},
+	})
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "weekly",
+		Short: "Run weekly review",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).ReviewWeekly(cmd.Context())
 		},
 	})
 
@@ -478,6 +576,16 @@ func newPluginCmd(a **app.App) *cobra.Command {
 			return (*a).PluginEnable(cmd.Context(), args[0])
 		},
 	})
+
+	runCmd := &cobra.Command{
+		Use:   "run <name> [args...]",
+		Short: "Run a plugin",
+		Args:  cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).PluginRun(cmd.Context(), args[0], args[1:])
+		},
+	}
+	cmd.AddCommand(runCmd)
 
 	return cmd
 }
@@ -766,6 +874,27 @@ func newTimerCmd(a **app.App) *cobra.Command {
 			return (*a).TimerCount(cmd.Context())
 		},
 	})
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "cancel <id>",
+		Short: "Cancel a timer",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).TimerCancel(cmd.Context(), args[0])
+		},
+	})
+
+	timerSnoozeCmd := &cobra.Command{
+		Use:   "snooze <id>",
+		Short: "Snooze a completed timer",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			minutes, _ := cmd.Flags().GetInt("minutes")
+			return (*a).TimerSnooze(cmd.Context(), args[0], minutes)
+		},
+	}
+	timerSnoozeCmd.Flags().Int("minutes", 5, "Snooze duration in minutes")
+	cmd.AddCommand(timerSnoozeCmd)
 
 	return cmd
 }
@@ -1118,5 +1247,855 @@ func newHouseholdCmd(a **app.App) *cobra.Command {
 		},
 	})
 
+	return cmd
+}
+
+func newHabitCmd(a **app.App) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "habit",
+		Short: "Manage habits",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			due, _ := cmd.Flags().GetBool("due")
+			return (*a).HabitList(cmd.Context(), due)
+		},
+	}
+	cmd.Flags().Bool("due", false, "Only habits due today")
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "list",
+		Short: "List habits",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			due, _ := cmd.Flags().GetBool("due")
+			return (*a).HabitList(cmd.Context(), due)
+		},
+	})
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "done <id>",
+		Short: "Mark a habit as done",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).HabitDone(cmd.Context(), args[0])
+		},
+	})
+
+	skipCmd := &cobra.Command{
+		Use:   "skip <id>",
+		Short: "Skip a habit",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			reason, _ := cmd.Flags().GetString("reason")
+			date, _ := cmd.Flags().GetString("date")
+			return (*a).HabitSkip(cmd.Context(), args[0], reason, date)
+		},
+	}
+	skipCmd.Flags().String("reason", "", "Reason for skipping")
+	skipCmd.Flags().String("date", "", "Date to skip (default: today)")
+	cmd.AddCommand(skipCmd)
+
+	streakCmd := &cobra.Command{
+		Use:   "streak <id>",
+		Short: "Show streak info",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			history, _ := cmd.Flags().GetBool("history")
+			return (*a).HabitStreak(cmd.Context(), args[0], history)
+		},
+	}
+	streakCmd.Flags().Bool("history", false, "Show completion history")
+	cmd.AddCommand(streakCmd)
+
+	scheduleCmd := &cobra.Command{
+		Use:   "schedule",
+		Short: "Trigger AI habit scheduling",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			days, _ := cmd.Flags().GetInt("days")
+			return (*a).HabitSchedule(cmd.Context(), days)
+		},
+	}
+	scheduleCmd.Flags().Int("days", 7, "Number of days to schedule")
+	cmd.AddCommand(scheduleCmd)
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "reminders",
+		Short: "List habit reminders",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).HabitReminders(cmd.Context())
+		},
+	})
+
+	// habit chain subcommands
+	chainCmd := &cobra.Command{
+		Use:   "chain",
+		Short: "Manage habit chains",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).HabitChainList(cmd.Context())
+		},
+	}
+	chainCmd.AddCommand(&cobra.Command{
+		Use:   "list",
+		Short: "List habit chains",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).HabitChainList(cmd.Context())
+		},
+	})
+	chainCmd.AddCommand(&cobra.Command{
+		Use:   "create <name>",
+		Short: "Create a habit chain",
+		Args:  cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).HabitChainCreate(cmd.Context(), args[0])
+		},
+	})
+	chainCmd.AddCommand(&cobra.Command{
+		Use:   "done <chain-id>",
+		Short: "Complete all habits in a chain",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).HabitChainDone(cmd.Context(), args[0])
+		},
+	})
+	cmd.AddCommand(chainCmd)
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "smart-time <id>",
+		Short: "Calculate optimal reminder time for a habit",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).HabitCalculateSmartTime(cmd.Context(), args[0])
+		},
+	})
+
+	return cmd
+}
+
+func newChoreCmd(a **app.App) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "chore",
+		Short: "Manage household chores",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			date, _ := cmd.Flags().GetString("date")
+			return (*a).ChoreList(cmd.Context(), date)
+		},
+	}
+	cmd.Flags().String("date", "", "Date (default: today)")
+
+	listCmd := &cobra.Command{
+		Use:   "list",
+		Short: "List today's chores",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			date, _ := cmd.Flags().GetString("date")
+			return (*a).ChoreList(cmd.Context(), date)
+		},
+	}
+	listCmd.Flags().String("date", "", "Date (default: today)")
+	cmd.AddCommand(listCmd)
+
+	doneCmd := &cobra.Command{
+		Use:   "done <instance-id>",
+		Short: "Mark a chore as done",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			note, _ := cmd.Flags().GetString("note")
+			return (*a).ChoreDone(cmd.Context(), args[0], note)
+		},
+	}
+	doneCmd.Flags().String("note", "", "Completion note")
+	cmd.AddCommand(doneCmd)
+
+	scheduleCmd := &cobra.Command{
+		Use:   "schedule",
+		Short: "Show chore schedule",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			date, _ := cmd.Flags().GetString("date")
+			return (*a).ChoreSchedule(cmd.Context(), date)
+		},
+	}
+	scheduleCmd.Flags().String("date", "", "Date (default: today)")
+	cmd.AddCommand(scheduleCmd)
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "stats",
+		Short: "Show chore statistics",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).ChoreStats(cmd.Context())
+		},
+	})
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "rotation <chore-id>",
+		Short: "Show rotation status for a chore",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).ChoreRotation(cmd.Context(), args[0])
+		},
+	})
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "rotation-advance <chore-id>",
+		Short: "Advance rotation to next member",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).ChoreRotationAdvance(cmd.Context(), args[0])
+		},
+	})
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "rotation-reset <chore-id>",
+		Short: "Reset rotation to first member",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).ChoreRotationReset(cmd.Context(), args[0])
+		},
+	})
+
+	return cmd
+}
+
+func newNotificationCmd(a **app.App) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "notification",
+		Short: "Manage notifications",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			unread, _ := cmd.Flags().GetBool("unread")
+			limit, _ := cmd.Flags().GetInt("limit")
+			return (*a).NotificationsList(cmd.Context(), unread, limit)
+		},
+	}
+	cmd.Flags().Bool("unread", false, "Show only unread")
+	cmd.Flags().Int("limit", 20, "Max results")
+
+	listCmd := &cobra.Command{
+		Use:   "list",
+		Short: "List notifications",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			unread, _ := cmd.Flags().GetBool("unread")
+			limit, _ := cmd.Flags().GetInt("limit")
+			return (*a).NotificationsList(cmd.Context(), unread, limit)
+		},
+	}
+	listCmd.Flags().Bool("unread", false, "Show only unread")
+	listCmd.Flags().Int("limit", 20, "Max results")
+	cmd.AddCommand(listCmd)
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "unread",
+		Short: "Show unread notification count",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).NotificationsUnread(cmd.Context())
+		},
+	})
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "read <id>",
+		Short: "Mark a notification as read",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).NotificationsRead(cmd.Context(), args[0])
+		},
+	})
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "read-all",
+		Short: "Mark all notifications as read",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).NotificationsReadAll(cmd.Context())
+		},
+	})
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "delete <id>",
+		Short: "Delete a notification",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).NotificationsDelete(cmd.Context(), args[0])
+		},
+	})
+
+	return cmd
+}
+
+func newStatsCmd(a **app.App) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "stats",
+		Short: "Show productivity statistics",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).StatsProductivity(cmd.Context())
+		},
+	}
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "streaks",
+		Short: "Show gamification streaks",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).StatsStreaks(cmd.Context())
+		},
+	})
+
+	achieveCmd := &cobra.Command{
+		Use:   "achievements",
+		Short: "Show achievements",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			available, _ := cmd.Flags().GetBool("available")
+			return (*a).StatsAchievements(cmd.Context(), available)
+		},
+	}
+	achieveCmd.Flags().Bool("available", false, "Show only available (not yet unlocked)")
+	cmd.AddCommand(achieveCmd)
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "points",
+		Short: "Show total points",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).StatsPoints(cmd.Context())
+		},
+	})
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "pomodoro",
+		Short: "Show Pomodoro statistics",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).StatsPomodoroStats(cmd.Context())
+		},
+	})
+
+	return cmd
+}
+
+func newAPIKeyCmd(a **app.App) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "api-key",
+		Short: "Manage API keys",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).APIKeyList(cmd.Context())
+		},
+	}
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "list",
+		Short: "List API keys",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).APIKeyList(cmd.Context())
+		},
+	})
+
+	createCmd := &cobra.Command{
+		Use:   "create <name>",
+		Short: "Create an API key",
+		Args:  cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			desc, _ := cmd.Flags().GetString("description")
+			scopesStr, _ := cmd.Flags().GetString("scopes")
+			expiresAt, _ := cmd.Flags().GetString("expires")
+			var scopes []string
+			if scopesStr != "" {
+				scopes = splitCSV(scopesStr)
+			}
+			return (*a).APIKeyCreate(cmd.Context(), args[0], desc, scopes, expiresAt)
+		},
+	}
+	createCmd.Flags().String("description", "", "Description")
+	createCmd.Flags().String("scopes", "", "Comma-separated scopes")
+	createCmd.Flags().String("expires", "", "Expiry date (ISO 8601)")
+	cmd.AddCommand(createCmd)
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "revoke <id>",
+		Short: "Revoke an API key",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).APIKeyRevoke(cmd.Context(), args[0])
+		},
+	})
+
+	return cmd
+}
+
+func newExportCmd(a **app.App) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "export",
+		Short: "Data export management",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).ExportList(cmd.Context())
+		},
+	}
+
+	requestCmd := &cobra.Command{
+		Use:   "request",
+		Short: "Request a data export",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			format, _ := cmd.Flags().GetString("format")
+			includesStr, _ := cmd.Flags().GetString("includes")
+			var includes []string
+			if includesStr != "" {
+				includes = splitCSV(includesStr)
+			}
+			return (*a).ExportRequest(cmd.Context(), format, includes)
+		},
+	}
+	requestCmd.Flags().String("format", "json", "Export format (json, csv)")
+	requestCmd.Flags().String("includes", "", "Comma-separated data types to include")
+	cmd.AddCommand(requestCmd)
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "list",
+		Short: "List export jobs",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).ExportList(cmd.Context())
+		},
+	})
+
+	downloadCmd := &cobra.Command{
+		Use:   "download <id>",
+		Short: "Download an export",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			out, _ := cmd.Flags().GetString("output")
+			return (*a).ExportDownload(cmd.Context(), args[0], out)
+		},
+	}
+	downloadCmd.Flags().String("output", "-", "Output file path (- for stdout)")
+	cmd.AddCommand(downloadCmd)
+
+	return cmd
+}
+
+func newAccountCmd(a **app.App) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "account",
+		Short: "Account information",
+	}
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "usage",
+		Short: "Show account usage",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).AccountUsage(cmd.Context())
+		},
+	})
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "limits",
+		Short: "Show subscription limits",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).AccountLimits(cmd.Context())
+		},
+	})
+
+	return cmd
+}
+
+func newAICmd(a **app.App) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "ai",
+		Short: "AI assistant",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).AIConversationList(cmd.Context())
+		},
+	}
+
+	chatCmd := &cobra.Command{
+		Use:   "chat <message>",
+		Short: "Send a message to the AI assistant",
+		Args:  cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			convID, _ := cmd.Flags().GetString("conversation")
+			return (*a).AIChat(cmd.Context(), args[0], convID)
+		},
+	}
+	chatCmd.Flags().String("conversation", "", "Continue an existing conversation ID")
+	cmd.AddCommand(chatCmd)
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "conversations",
+		Short: "List AI conversations",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).AIConversationList(cmd.Context())
+		},
+	})
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "delete <id>",
+		Short: "Delete an AI conversation",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).AIConversationDelete(cmd.Context(), args[0])
+		},
+	})
+
+	createConvCmd := &cobra.Command{
+		Use:   "new",
+		Short: "Create a new AI conversation",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			title, _ := cmd.Flags().GetString("title")
+			return (*a).AIConversationCreate(cmd.Context(), title)
+		},
+	}
+	createConvCmd.Flags().String("title", "", "Conversation title")
+	cmd.AddCommand(createConvCmd)
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "archive <id>",
+		Short: "Archive an AI conversation",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).AIConversationArchive(cmd.Context(), args[0])
+		},
+	})
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "search <query>",
+		Short: "Search AI conversations",
+		Args:  cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).AIConversationSearch(cmd.Context(), args[0])
+		},
+	})
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "stats",
+		Short: "Show AI conversation stats",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).AIConversationStats(cmd.Context())
+		},
+	})
+
+	return cmd
+}
+
+func newPomodoroCmd(a **app.App) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "pomodoro",
+		Short: "Pomodoro timer management",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).PomodoroStatus(cmd.Context())
+		},
+	}
+
+	startCmd := &cobra.Command{
+		Use:   "start",
+		Short: "Start a Pomodoro session",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			taskID, _ := cmd.Flags().GetString("task")
+			label, _ := cmd.Flags().GetString("label")
+			duration, _ := cmd.Flags().GetInt("duration")
+			return (*a).PomodoroStart(cmd.Context(), taskID, label, duration)
+		},
+	}
+	startCmd.Flags().String("task", "", "Task ID to link")
+	startCmd.Flags().String("label", "", "Session label")
+	startCmd.Flags().Int("duration", 0, "Duration in minutes (0 = use settings)")
+	cmd.AddCommand(startCmd)
+
+	smartCmd := &cobra.Command{
+		Use:   "smart",
+		Short: "Start a smart Pomodoro with AI suggestions",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			minutes, _ := cmd.Flags().GetInt("minutes")
+			return (*a).PomodoroSmartStart(cmd.Context(), minutes)
+		},
+	}
+	smartCmd.Flags().Int("minutes", 25, "Available minutes")
+	cmd.AddCommand(smartCmd)
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "status",
+		Short: "Show current Pomodoro session",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).PomodoroStatus(cmd.Context())
+		},
+	})
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "pause",
+		Short: "Pause the current session",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).PomodoroPause(cmd.Context())
+		},
+	})
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "resume",
+		Short: "Resume the paused session",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).PomodoroResume(cmd.Context())
+		},
+	})
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "stop",
+		Short: "Cancel the current session",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).PomodoroStop(cmd.Context())
+		},
+	})
+
+	completeCmd := &cobra.Command{
+		Use:   "complete",
+		Short: "Mark the current session as complete",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			note, _ := cmd.Flags().GetString("note")
+			return (*a).PomodoroComplete(cmd.Context(), note)
+		},
+	}
+	completeCmd.Flags().String("note", "", "Completion note")
+	cmd.AddCommand(completeCmd)
+
+	interruptCmd := &cobra.Command{
+		Use:   "interrupt <session-id>",
+		Short: "Record an interruption",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			reason, _ := cmd.Flags().GetString("reason")
+			return (*a).PomodoroInterrupt(cmd.Context(), args[0], reason)
+		},
+	}
+	interruptCmd.Flags().String("reason", "", "Reason for interruption")
+	cmd.AddCommand(interruptCmd)
+
+	suggestCmd := &cobra.Command{
+		Use:   "suggest",
+		Short: "Get task suggestions for a Pomodoro",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			minutes, _ := cmd.Flags().GetInt("minutes")
+			max, _ := cmd.Flags().GetInt("max")
+			return (*a).PomodoroSuggestions(cmd.Context(), minutes, max)
+		},
+	}
+	suggestCmd.Flags().Int("minutes", 25, "Available minutes")
+	suggestCmd.Flags().Int("max", 5, "Max suggestions")
+	cmd.AddCommand(suggestCmd)
+
+	historyCmd := &cobra.Command{
+		Use:   "history",
+		Short: "Show session history",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).PomodoroHistory(cmd.Context(), nil)
+		},
+	}
+	cmd.AddCommand(historyCmd)
+
+	settingsCmd := &cobra.Command{
+		Use:   "settings",
+		Short: "Show Pomodoro settings",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).PomodoroSettings(cmd.Context())
+		},
+	}
+	cmd.AddCommand(settingsCmd)
+
+	return cmd
+}
+
+func newCommentCmd(a **app.App) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "comment",
+		Short: "Manage task comments",
+	}
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "list <task-id>",
+		Short: "List comments for a task",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).CommentList(cmd.Context(), args[0])
+		},
+	})
+
+	addCmd := &cobra.Command{
+		Use:   "add <task-id> <content>",
+		Short: "Add a comment to a task",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).CommentAdd(cmd.Context(), args[0], args[1])
+		},
+	}
+	cmd.AddCommand(addCmd)
+
+	editCmd := &cobra.Command{
+		Use:   "edit <task-id> <comment-id> <content>",
+		Short: "Edit a comment",
+		Args:  cobra.ExactArgs(3),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).CommentEdit(cmd.Context(), args[0], args[1], args[2])
+		},
+	}
+	cmd.AddCommand(editCmd)
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "delete <task-id> <comment-id>",
+		Short: "Delete a comment",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).CommentDelete(cmd.Context(), args[0], args[1])
+		},
+	})
+
+	// Task sharing subcommands
+	shareCmd := &cobra.Command{
+		Use:   "share",
+		Short: "Manage task sharing",
+	}
+
+	shareAddCmd := &cobra.Command{
+		Use:   "add <task-id> <member-id>",
+		Short: "Share a task with a household member",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			shareType, _ := cmd.Flags().GetString("type")
+			message, _ := cmd.Flags().GetString("message")
+			return (*a).TaskShare(cmd.Context(), args[0], args[1], shareType, message)
+		},
+	}
+	shareAddCmd.Flags().String("type", "view", "Share type (view, edit, delegate)")
+	shareAddCmd.Flags().String("message", "", "Message to include")
+	shareCmd.AddCommand(shareAddCmd)
+
+	shareRespondCmd := &cobra.Command{
+		Use:   "respond <task-id> <accept|decline>",
+		Short: "Accept or decline a shared task",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			note, _ := cmd.Flags().GetString("note")
+			return (*a).TaskShareRespond(cmd.Context(), args[0], args[1], note)
+		},
+	}
+	shareRespondCmd.Flags().String("note", "", "Optional note")
+	shareCmd.AddCommand(shareRespondCmd)
+
+	shareCmd.AddCommand(&cobra.Command{
+		Use:   "revoke <task-id> <member-id>",
+		Short: "Revoke a task share",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).TaskShareRevoke(cmd.Context(), args[0], args[1])
+		},
+	})
+
+	shareCmd.AddCommand(&cobra.Command{
+		Use:   "inbox",
+		Short: "Show tasks shared with you",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).SharedInbox(cmd.Context())
+		},
+	})
+
+	cmd.AddCommand(shareCmd)
+
+	return cmd
+}
+
+func newPlanCmd(a **app.App) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "plan <goal>",
+		Short: "Generate an AI plan for a goal",
+		Args:  cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			hours, _ := cmd.Flags().GetInt("hours")
+			deadline, _ := cmd.Flags().GetString("deadline")
+			priority, _ := cmd.Flags().GetString("priority")
+			return (*a).PlanGoal(cmd.Context(), args[0], hours, deadline, priority)
+		},
+	}
+	cmd.Flags().Int("hours", 0, "Available hours")
+	cmd.Flags().String("deadline", "", "Hard deadline")
+	cmd.Flags().String("priority", "", "Priority zone filter")
+	return cmd
+}
+
+func newScheduleCmd(a **app.App) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "schedule",
+		Short: "Auto-schedule today's tasks into calendar slots",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			date, _ := cmd.Flags().GetString("date")
+			buffer, _ := cmd.Flags().GetInt("buffer")
+			return (*a).AutoSchedule(cmd.Context(), date, buffer)
+		},
+	}
+	cmd.Flags().String("date", "", "Date to schedule (default: today)")
+	cmd.Flags().Int("buffer", 15, "Buffer minutes between tasks")
+	return cmd
+}
+
+func newRescheduleCmd(a **app.App) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "reschedule <id...>",
+		Short: "Move tasks to a different date",
+		Args:  cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			date, _ := cmd.Flags().GetString("date")
+			spread, _ := cmd.Flags().GetInt("spread")
+			reason, _ := cmd.Flags().GetString("reason")
+			return (*a).Reschedule(cmd.Context(), args, date, spread, reason)
+		},
+	}
+	cmd.Flags().String("date", "", "Target date (required)")
+	cmd.Flags().Int("spread", 0, "Spread across N days")
+	cmd.Flags().String("reason", "", "Reason for rescheduling")
+	return cmd
+}
+
+func newCompletionCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "completion [bash|zsh|fish|powershell]",
+		Short: "Generate shell completion scripts",
+		Long: `Generate shell completion scripts for the specified shell.
+
+Examples:
+  source <(mynow completion bash)
+  mynow completion zsh > ~/.zsh/completions/_mynow
+  mynow completion fish > ~/.config/fish/completions/mynow.fish`,
+		Args:      cobra.ExactArgs(1),
+		ValidArgs: []string{"bash", "zsh", "fish", "powershell"},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			root := cmd.Root()
+			switch args[0] {
+			case "bash":
+				return root.GenBashCompletion(os.Stdout)
+			case "zsh":
+				return root.GenZshCompletion(os.Stdout)
+			case "fish":
+				return root.GenFishCompletion(os.Stdout, true)
+			case "powershell":
+				return root.GenPowerShellCompletion(os.Stdout)
+			default:
+				return fmt.Errorf("unsupported shell: %s", args[0])
+			}
+		},
+	}
+	return cmd
+}
+
+func newSharedInboxCmd(a **app.App) *cobra.Command {
+	return &cobra.Command{
+		Use:   "shared-inbox",
+		Short: "Tasks shared with you by household members",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (*a).SharedInbox(cmd.Context())
+		},
+	}
+}
+
+func newManCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "man",
+		Short: "Generate man page",
+		Long:  "Generate man page for mynow and write to the specified directory.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			dir, _ := cmd.Flags().GetString("dir")
+			if dir == "" {
+				dir = "."
+			}
+			header := &doc.GenManHeader{
+				Title:   "MYNOW",
+				Section: "1",
+				Source:  "Mind Your Now",
+				Manual:  "Mind Your Now CLI",
+			}
+			return doc.GenManTree(cmd.Root(), header, dir)
+		},
+	}
+	cmd.Flags().String("dir", ".", "Directory to write man page(s)")
 	return cmd
 }

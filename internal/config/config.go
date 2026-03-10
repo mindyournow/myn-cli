@@ -72,9 +72,9 @@ type DisplayConfig struct {
 type TUIConfig struct {
 	Theme           string `yaml:"theme"`            // dark | light | auto
 	RefreshInterval string `yaml:"refresh_interval"` // e.g. "30s"
-	VimKeys         bool   `yaml:"vim_keys"`
-	Mouse           bool   `yaml:"mouse"`
-	Animations      bool   `yaml:"animations"`
+	VimKeys         *bool  `yaml:"vim_keys"`
+	Mouse           *bool  `yaml:"mouse"`
+	Animations      *bool  `yaml:"animations"`
 }
 
 // RefreshIntervalDuration parses RefreshInterval; falls back to 30s on error.
@@ -92,6 +92,11 @@ type DefaultsConfig struct {
 	TaskType          string `yaml:"task_type"`
 	CalendarDays      int    `yaml:"calendar_days"`
 	HabitScheduleDays int    `yaml:"habit_schedule_days"`
+}
+
+// boolPtr returns a pointer to the given bool value.
+func boolPtr(b bool) *bool {
+	return &b
 }
 
 // defaults returns the baseline Config with all sensible defaults filled in.
@@ -115,9 +120,9 @@ func defaults() Config {
 		TUI: TUIConfig{
 			Theme:           "dark",
 			RefreshInterval: "30s",
-			VimKeys:         true,
-			Mouse:           false,
-			Animations:      true,
+			VimKeys:         boolPtr(true),
+			Mouse:           boolPtr(false),
+			Animations:      boolPtr(true),
 		},
 		Defaults: DefaultsConfig{
 			Priority:          "OPPORTUNITY_NOW",
@@ -249,17 +254,15 @@ func mergeConfig(dst, src *Config) {
 	if src.TUI.RefreshInterval != "" {
 		dst.TUI.RefreshInterval = src.TUI.RefreshInterval
 	}
-	// booleans: use src value (yaml.Unmarshal sets false for absent bools, so we
-	// can't distinguish "false" from "not set" without pointer types; for now
-	// we overwrite only when the whole TUI section was present in the file).
-	if src.TUI.VimKeys {
-		dst.TUI.VimKeys = true
+	// Pointer booleans: only override if explicitly set in the file (non-nil).
+	if src.TUI.VimKeys != nil {
+		dst.TUI.VimKeys = src.TUI.VimKeys
 	}
-	if src.TUI.Mouse {
-		dst.TUI.Mouse = true
+	if src.TUI.Mouse != nil {
+		dst.TUI.Mouse = src.TUI.Mouse
 	}
-	if src.TUI.Animations {
-		dst.TUI.Animations = true
+	if src.TUI.Animations != nil {
+		dst.TUI.Animations = src.TUI.Animations
 	}
 	if src.Defaults.Priority != "" {
 		dst.Defaults.Priority = src.Defaults.Priority
@@ -332,11 +335,20 @@ func GetValue(cfg *Config, key string) (string, error) {
 	case "tui.refresh_interval":
 		return cfg.TUI.RefreshInterval, nil
 	case "tui.vim_keys":
-		return strconv.FormatBool(cfg.TUI.VimKeys), nil
+		if cfg.TUI.VimKeys != nil {
+			return strconv.FormatBool(*cfg.TUI.VimKeys), nil
+		}
+		return "false", nil
 	case "tui.mouse":
-		return strconv.FormatBool(cfg.TUI.Mouse), nil
+		if cfg.TUI.Mouse != nil {
+			return strconv.FormatBool(*cfg.TUI.Mouse), nil
+		}
+		return "false", nil
 	case "tui.animations":
-		return strconv.FormatBool(cfg.TUI.Animations), nil
+		if cfg.TUI.Animations != nil {
+			return strconv.FormatBool(*cfg.TUI.Animations), nil
+		}
+		return "false", nil
 	case "defaults.priority":
 		return cfg.Defaults.Priority, nil
 	case "defaults.task_type":
@@ -429,19 +441,19 @@ func SetValue(cfg *Config, key, value string) error {
 		if err != nil {
 			return fmt.Errorf("invalid tui.vim_keys %q: must be true or false", value)
 		}
-		cfg.TUI.VimKeys = b
+		cfg.TUI.VimKeys = boolPtr(b)
 	case "tui.mouse":
 		b, err := strconv.ParseBool(value)
 		if err != nil {
 			return fmt.Errorf("invalid tui.mouse %q: must be true or false", value)
 		}
-		cfg.TUI.Mouse = b
+		cfg.TUI.Mouse = boolPtr(b)
 	case "tui.animations":
 		b, err := strconv.ParseBool(value)
 		if err != nil {
 			return fmt.Errorf("invalid tui.animations %q: must be true or false", value)
 		}
-		cfg.TUI.Animations = b
+		cfg.TUI.Animations = boolPtr(b)
 	case "defaults.priority":
 		cfg.Defaults.Priority = value
 	case "defaults.task_type":

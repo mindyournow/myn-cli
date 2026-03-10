@@ -35,7 +35,7 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.Display.Color != "auto" {
 		t.Errorf("Display.Color = %q, want auto", cfg.Display.Color)
 	}
-	if cfg.TUI.VimKeys != true {
+	if cfg.TUI.VimKeys == nil || *cfg.TUI.VimKeys != true {
 		t.Error("TUI.VimKeys should default to true")
 	}
 	if cfg.Defaults.CalendarDays != 7 {
@@ -385,7 +385,7 @@ func TestSetValue(t *testing.T) {
 	if err := SetValue(&cfg, "tui.vim_keys", "false"); err != nil {
 		t.Fatalf("SetValue tui.vim_keys: %v", err)
 	}
-	if cfg.TUI.VimKeys != false {
+	if cfg.TUI.VimKeys == nil || *cfg.TUI.VimKeys != false {
 		t.Error("TUI.VimKeys should be false after set")
 	}
 }

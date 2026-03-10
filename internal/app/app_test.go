@@ -137,22 +137,18 @@ func TestApp_TaskSnoozeTask_RequiresAuth(t *testing.T) {
 }
 
 func TestApp_ReviewDaily(t *testing.T) {
-	app, err := New()
+	a, err := New()
 	if err != nil {
 		t.Skipf("Skipping: New() error = %v", err)
 	}
 
-	var buf bytes.Buffer
-	app.SetFormatter(output.NewFormatterWithWriter(&buf, false, false, true))
+	a.SetFormatter(output.NewFormatterWithWriter(&bytes.Buffer{}, false, false, true))
 
 	ctx := context.Background()
-	err = app.ReviewDaily(ctx)
-	if err != nil {
-		t.Fatalf("ReviewDaily() error = %v", err)
-	}
-
-	if buf.String() == "" {
-		t.Error("Output should not be empty")
+	err = a.ReviewDaily(ctx)
+	// Without credentials, ReviewDaily should fail with an auth error.
+	if err == nil {
+		t.Fatal("ReviewDaily() without auth: expected error, got nil")
 	}
 }
 

@@ -3,6 +3,7 @@
 package errors
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -44,6 +45,9 @@ func (e *CLIError) Unwrap() error {
 func ExitCode(err error) int {
 	if err == nil {
 		return ExitSuccess
+	}
+	if errors.Is(err, context.Canceled) {
+		return 130 // SIGINT standard
 	}
 	var cliErr *CLIError
 	if errors.As(err, &cliErr) {

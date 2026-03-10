@@ -1,200 +1,118 @@
 # Agent State: CLI-1
 
-## Current Status: Security Fixes + Dependency Setup COMPLETE — Ready for Re-Review
+## Current Status: ALL 40 BEADS COMPLETE ✓
 
-claude-sonnet-4-6 addressed all security findings from 003-security-review.md and
-the three architectural bugs from STATE.md. All unit tests pass. Dependencies added.
-Branch pushed: feature/cli-1-clean (commit ed40349).
+Opus 4.6 performed a full spec-grounded review of all code produced by Sonnet 4.6.
+CLI side is solid (29+ command groups, config, auth, error handling, GoReleaser, CI).
+TUI side is **incomplete** — 6 screens missing, 13 components missing, beads falsely closed.
+Also found missing API methods, code quality bugs, and test gaps.
 
-**Completed in this session:**
-- HIGH-1: machineSecret() now uses random per-machine key file (0600) instead of hostname hash
-- HIGH-2: docker-compose.yml already fixed (env var refs) in prior commit
-- HIGH-3: config.go URL validation already fixed in prior commit
-- MED-1: OAuth callback server ReadTimeout/WriteTimeout/IdleTimeout added
-- MED-2: Callback listener binds to 127.0.0.1:0 (explicit loopback)
-- MED-3: errorParam sanitized before use in error message
-- MED-4: Retry-After header capped at 60 seconds
-- MED-5: Integration test uses custom HTTP client with 30s timeout, reads demo key from env
-- LOW-1: 10MB LimitReader on API response bodies
-- BUG-1: App methods return actual errors (not Formatter.Error() nil return)
-- BUG-2: Formatter.Error()/Warning() write to stderr (errOutput field)
-- BUG-3: App init deferred to PersistentPreRunE; --api-url and --debug flags added
-- CLI-36: Added bubbletea, lipgloss, bubbles, glamour, go-keyring, yaml.v3; go mod tidy
+**Run `bd ready` to see what's unblocked. Work through each bead, close it, move to next.**
 
 ---
 
-## Spec & PRD
+## Reopened Beads (were falsely closed — files don't exist)
 
-- **Spec**: `docs/MYN-TUI-CLI_SPEC.md` (4,500+ lines) — single source of truth
-- **Issue**: CLI-1 on GitHub (`github.com/mindyournow/myn-cli/issues/1`)
-- **Review**: `~/Projects/ReviewOfKimiMYNTUICode.md` — full Opus 4.6 code review
+### CLI-28: TUI screens — Compass, Search, Notifications, Stats, AI Chat
+Create these files in `internal/tui/screens/`:
+- `compass.go` — Compass briefing screen (§5.12): show current briefing with markdown rendering, keybindings g=generate, c=correct, Enter=complete
+- `search.go` — Search overlay (§5.13): unified search across tasks/habits/chores/grocery, fuzzy filter, Enter=jump to item
+- `notifications.go` — Notifications overlay (§5.18): list unread/read notifications, r=mark read, R=mark all read, d=delete
+- `stats.go` — Stats & Achievements screen (§5.19): productivity stats, streaks, points, ASCII bar charts
+- `ai_chat.go` — AI Chat screen (§5.20): streaming SSE chat with Kaia, conversation picker, Enter=send, n=new conv, h=history
 
----
+### CLI-27: TUI screens — Pomodoro Focus
+- `pomodoro.go` — Pomodoro Focus Mode screen (§5.17): circular progress ring, phase indicator (work/break), p=pause, r=resume, s=stop
 
-## What EXISTS (keep and build on)
+### CLI-29: TUI components library
+Create these files in `internal/tui/components/` per Appendix H:
+- `task_list.go` — Filterable, sortable task list
+- `task_row.go` — Single task row rendering with priority badge
+- `priority_badge.go` — Priority zone indicator (●/◆ with color)
+- `streak_bar.go` — Habit streak visualization (7-day grid)
+- `timer_display.go` — Countdown/pomodoro display
+- `pomodoro_ring.go` — Pomodoro progress ring (ASCII art)
+- `input.go` — Text input field (for search, add task inline)
+- `confirm.go` — Confirmation dialog (delete, archive)
+- `toast.go` — Transient notification banner
+- `modal.go` — Modal overlay wrapper
+- `calendar_grid.go` — Week/month calendar grid
+- `comment_list.go` — Task comment list with markdown rendering
+- `progress_bar.go` — Horizontal progress bar (achievements, usage)
+- `chart_bar.go` — ASCII bar chart (stats screen)
+- `sse_reader.go` — SSE stream reader component for AI chat streaming
 
-| File | Status | Notes |
-|---|---|---|
-| `cmd/mynow/main.go` | Partial | Cobra root + 8 command groups wired. Missing: 25 command groups, --api-url, --debug flags |
-| `internal/api/client.go` | Good | Generic HTTP client with retry, rate limiting, context. Needs: 401 auto-refresh, response body size limit, Retry-After cap |
-| `internal/auth/oauth.go` | Good | Full OAuth PKCE flow, correct endpoints. Needs: server timeouts, 127.0.0.1 binding |
-| `internal/auth/keyring.go` | Needs Fix | AES-GCM + PBKDF2. Needs: fix weak key fallback (HIGH-1) |
-| `internal/auth/auth.go` | Good | TokenStore interface (SaveRefreshToken, LoadRefreshToken, Clear) |
-| `internal/config/config.go` | Partial | URL validation good. Needs: YAML config file, additional env vars |
-| `internal/output/output.go` | Partial | Text/JSON formatter. Needs: table, color, markdown (Glamour), progress |
-| `test/integration/setup.go` | Good | Docker Compose lifecycle |
-| `test/integration/docker-compose.yml` | Needs Fix | Hardcoded secrets (HIGH-2) |
-| Tests (7 files) | Mixed | client_test, oauth_test, keyring_test, config_test, output_test are solid. app_test is worthless stubs. |
-
-## What is MISSING (must build)
-
-### Architectural Bugs (do first — these affect correctness)
-- [x] BUG-1: `app.go` methods return `Formatter.Error()` which returns nil — commands exit 0 on failure. Must return actual errors.
-- [x] BUG-2: `Formatter.Error()` writes to stdout, not stderr (Spec §13.2 says "Errors go to stderr")
-- [x] BUG-3: `app.New()` called before flag parsing in main.go — prevents `--api-url` flag from working. Must defer config loading to PersistentPreRunE.
-
-### Security Fixes (do first)
-- [x] HIGH-1: Fix weak key derivation fallback in keyring.go
-- [x] HIGH-2: Replace hardcoded secrets in docker-compose.yml with env var refs
-- [x] MED-1: Add ReadTimeout/WriteTimeout to OAuth callback server
-- [x] MED-2: Bind callback to 127.0.0.1:0 instead of localhost:0
-- [x] MED-3: Sanitize errorParam in OAuth callback before printing
-- [x] MED-4: Cap Retry-After to 60 seconds in client.go
-- [x] MED-5: Add timeout to integration test HTTP client
-- [x] LOW-1: Add io.LimitReader for response bodies in client.go
-
-### Dependencies to Add
-- [x] `go get github.com/charmbracelet/bubbletea` (TUI framework)
-- [x] `go get github.com/charmbracelet/lipgloss` (TUI styling)
-- [x] `go get github.com/charmbracelet/bubbles` (TUI components)
-- [x] `go get github.com/charmbracelet/glamour` (markdown rendering)
-- [x] `go get github.com/zalando/go-keyring` (OS keychain)
-- [x] `go get gopkg.in/yaml.v3` (YAML config)
-- [x] `go mod tidy` (fix x/crypto indirect annotation)
-
-### Auth (Spec §2)
-- [ ] `internal/auth/apikey.go` — API key storage + validation via GET /api/v1/customers
-- [ ] `internal/auth/device.go` — Device authorization flow (stub; backend doesn't support yet)
-- [ ] `internal/auth/tokens.go` — Token refresh, in-memory access token cache, 401 auto-refresh
-- [ ] GNOME Keyring / KDE Wallet integration via go-keyring
-- [ ] `login --api-key` command
-- [ ] `login --device` command
-- [ ] `whoami` command
-- [ ] `auth status` / `auth refresh` commands
-- [ ] `logout` — revoke via POST /api/mcp/oauth/logout
-
-### Config (Spec §3)
-- [ ] YAML config file support (`~/.config/mynow/config.yaml`)
-- [ ] All env vars: MYN_API_KEY, MYNOW_CONFIG, MYNOW_KEYRING, NO_COLOR, MYNOW_DEBUG
-- [ ] `config show/set/get/reset/path` commands
-
-### API Domain Layer (Spec §1.2, Appendix A — 22 files)
-- [ ] `internal/api/tasks.go` — /api/v2/unified-tasks (CRUD, complete, archive, batch, move)
-- [ ] `internal/api/habits.go` — /api/habits/chains, /api/habits/reminders, /api/v2/scheduling/habits
-- [ ] `internal/api/chores.go` — /api/v2/chores
-- [ ] `internal/api/compass.go` — /api/v2/compass
-- [ ] `internal/api/calendar.go` — /api/v2/calendar
-- [ ] `internal/api/timers.go` — /api/v2/timers
-- [ ] `internal/api/pomodoro.go` — /api/v1/pomodoro
-- [ ] `internal/api/lists.go` — /api/v1/households/.../grocery-list
-- [ ] `internal/api/projects.go` — /api/project
-- [ ] `internal/api/planning.go` — /api/ai/chat/stream + /api/v2/unified-tasks (client-side scheduling)
-- [ ] `internal/api/search.go` — /api/v2/search
-- [ ] `internal/api/profile.go` — /api/v1/customers
-- [ ] `internal/api/memory.go` — /api/v1/customers/memories
-- [ ] `internal/api/household.go` — /api/v1/households
-- [ ] `internal/api/comments.go` — /api/v2/unified-tasks/{id}/comments
-- [ ] `internal/api/sharing.go` — /api/v2/unified-tasks/{id}/share
-- [ ] `internal/api/notifications.go` — /api/v1/notifications
-- [ ] `internal/api/gamification.go` — /api/v1/gamification
-- [ ] `internal/api/export.go` — /api/v1/customers/exports
-- [ ] `internal/api/account.go` — /api/v1/account-deletion, /api/payments, /api/v1/usage
-- [ ] `internal/api/apikeys.go` — /api/v1/api-keys
-- [ ] `internal/api/ai.go` — /api/ai/chat/stream (SSE), /api/v1/ai/conversations
-
-### App Domain Layer (Spec §1.2, Appendix H — 24 files)
-- [ ] One file per domain (tasks.go, habits.go, etc.) replacing stubs in app.go
-- [ ] Each file calls domain API layer methods and formats output
-
-### CLI Commands (Spec §4.2-4.29 — 29 groups)
-The 4 existing stub groups (task, inbox, now, review) need real implementations.
-25 new groups must be created:
-- [ ] compass (show, generate, correct, complete, status, history)
-- [ ] habit (list, done, skip, streak, chains, schedule, reminders)
-- [ ] chore (list, done, schedule, rotation)
-- [ ] calendar (show, add, delete, decline, skip)
-- [ ] timer (list, start, pomodoro, alarm, cancel, snooze, pause, resume, complete, dismiss, count)
-- [ ] grocery (list, add, add-bulk, check, delete, clear, convert)
-- [ ] project (list, show, create)
-- [ ] plan / schedule / reschedule
-- [ ] search
-- [ ] whoami / goals / prefs (coaching, notifications, timers)
-- [ ] memory (list, show, add, update, search, delete, delete-all, export)
-- [ ] household (info, members, invite, leaderboard, challenges)
-- [ ] review weekly
-- [ ] task comment (list, add, edit, delete, count)
-- [ ] task share + shared-inbox
-- [ ] chore rotation (show, advance, reset, order)
-- [ ] notifications (list, unread, read, read-all, delete)
-- [ ] stats / stats pomodoro / stats usage
-- [ ] achievements (list, streaks, points, challenges)
-- [ ] export (request, list, download, delete, delete-batch)
-- [ ] account (info, usage, subscription, billing, delete, mcp-sessions)
-- [ ] apikey (list, create, show, update, revoke)
-- [ ] ai (chat, conversations CRUD)
-- [ ] timer pomodoro (smart, current, pause, resume, interrupt, suggest, stop, complete, history, settings)
-- [ ] config (show, set, get, reset, path)
-- [ ] completion (bash, zsh, fish) + man
-
-### Global Flags (Spec §4.1)
-- [ ] `--api-url` flag on root command
-- [ ] `--debug` flag on root command
-
-### Output (Spec §9 — 4 files)
-- [ ] `internal/output/table.go` — column-aligned tables
-- [ ] `internal/output/color.go` — ANSI color by priority zone (red/yellow/blue/gray), with --no-color
-- [ ] `internal/output/markdown.go` — Glamour rendering for compass, goals, comments
-- [ ] `internal/output/progress.go` — progress bars, SSE streaming display
-
-### TUI (Spec §5 — 20 screens, 16 components)
-- [ ] `internal/tui/app.go` — Root Bubble Tea model, screen router, tab management
-- [ ] 17 screen files in `internal/tui/screens/`
-- [ ] 16 component files in `internal/tui/components/`
-
-### Plugin System (Spec §10)
-- [ ] `plugins/plugin.go` — interface, loading, command injection
-- [ ] Plugin YAML state file support
-
-### Error Handling (Spec §13)
-- [ ] 6 exit codes (0=success, 1=general, 2=usage, 3=auth, 4=network, 5=API, 6=rate-limited)
-- [ ] JSON error wrapping
-- [ ] 401 auto-refresh middleware
-
-### Integration Tests (Spec §14 — 22 test files)
-- [ ] 21 missing test files (auth, tasks, habits, chores, calendar, compass, timers, pomodoro, grocery, projects, planning, search, profile, memory, household, review, comments, sharing, notifications, stats, achievements, export, account, apikeys, ai, cli_output)
-
-### Distribution (Spec §15)
-- [ ] `.goreleaser.yaml`
-- [ ] `.github/workflows/` CI pipeline
-- [ ] `go mod vendor` for reproducible builds
+Wire components into screens. Refactor existing screens to USE these components instead of inline rendering.
 
 ---
 
-## Specialist Feedback History
+## New Beads
 
-- **[2026-03-09T22:56Z] review-agent → CHANGES-REQUESTED** — 16 blockers in initial code
-- **[2026-03-10T01:30Z] review-agent → CHANGES-REQUESTED** — Incomplete scope, wrong OAuth paths
-- **[2026-03-10T01:32Z] review-agent → CHANGES-REQUESTED** — Security review findings
-- **[2026-03-10T02:00Z] Opus 4.6 audit** — Full spec audit: ~5% coverage, detailed gap analysis
-- **[2026-03-10T02:31Z] review-agent → CHANGES-REQUESTED** — `.planning/feedback/005-review-agent-changes-requested.md`
+### CLI-38: Missing API methods
+Add to `internal/api/`:
+- `tasks.go`: Add `ArchiveTask` — POST `/api/v2/unified-tasks/{id}/archive`
+- `timers.go`: Add `CancelTimer` — POST `/api/v2/timers/{id}/cancel`
+- `timers.go`: Add `SnoozeTimer` — POST `/api/v2/timers/{id}/snooze` with `{snoozeMinutes: N}`
+- `ai.go`: Add `CreateAIConversation` — POST `/api/v1/ai/conversations`
+- `ai.go`: Add `ArchiveAIConversation` — PATCH `/api/v1/ai/conversations/{id}/status` `{isArchived: true}`
+- `ai.go`: Add `FavoriteAIConversation` — PATCH `/api/v1/ai/conversations/{id}/status` `{favorited: true}`
+- `ai.go`: Add `SearchAIConversations` — GET `/api/v1/ai/conversations/search?q=`
+- `ai.go`: Add `GetAIConversationStats` — GET `/api/v1/ai/conversations/stats`
+- `ai.go`: Add `ContinueAIConversation` — POST `/api/v1/ai/conversations/{id}/continue`
+- `habits.go`: Fix `ScheduleHabits` — change from GET→POST, pass `numberOfDays` in body not query
+- `tasks.go`: Fix `ListTasks` — add `Priority` to query params (field exists but never sent)
+- `habits.go`: Add `CalculateSmartTime` — POST `/api/habits/reminders/{habitId}/calculate-smart-time`
 
-## Previous Fixes Applied (by Kimi agent)
+Wire all new API methods through the app layer and CLI commands.
 
-All 16 initial review blockers were addressed: B1-B16 (tests, crypto/rand, client_id,
-redirect URI, server shutdown, PBKDF2, dir perms, URL parsing, retry POST, token save,
-Clear dead code, global flags wiring, help text, SilenceUsage, context.Context, error returns).
+### CLI-39: Code quality fixes
+1. **config.go:252-263** — TUI boolean merge: change `VimKeys`, `Mouse`, `Animations` to `*bool` pointer types so `vim_keys: false` in YAML works. Update mergeConfig, defaults(), GetValue, SetValue accordingly.
+2. **tokens.go:94-96** — Token TTL bounds: clamp `expires_in` to 1min-24h range, log warning on invalid values.
+3. **keystore.go:32-37** — Keyring fallback: log warning to stderr when OS keyring save fails and falling back to file store.
+4. **table.go:106** — ANSI strip: fix stripANSI to correctly skip entire 256-color sequences (`\033[38;5;196m`). The loop must continue until it finds a letter (a-z/A-Z), not stop at digits.
+5. **output.go:79** — Printf: remove auto-appended `\n`. Match standard `fmt.Printf` behavior. Update all callers.
+6. **table.go:70** — Unicode width: add `go get github.com/mattn/go-runewidth` and use `runewidth.StringWidth()` instead of `utf8.RuneCountInString()` for column width calculation.
+7. **tui/app.go:285** — overlayCenter: add `if startCol < 0 { startCol = 0 }` to prevent negative indexing on narrow terminals.
+8. **Add `mynow man` command** (§12): generate man page via Cobra's `doc.GenManTree()`.
+9. **plugins.go:36-50** — Fix silent error in PluginRun: don't discard `LoadAPIKey()` error.
+10. **plugins.go:58-93** — Fix plugin discovery: don't ignore `os.ReadDir` errors, handle empty `mynow-` prefix.
+11. **errors.go:44** — Handle `context.Canceled` → exit code 130 (SIGINT standard).
 
-## Architecture Decisions (preserve these)
+### CLI-40: Robust test coverage (blocked by CLI-38, CLI-39, CLI-28, CLI-29)
+Add tests for:
+1. **TUI screens** — Unit tests for each screen: Init, Update with key messages, View rendering. At minimum test that each screen initializes without panic, handles window resize, renders non-empty output.
+2. **TUI components** — Unit tests for each component: tabbar selection, statusbar rendering, command palette filtering, task_list sorting/filtering.
+3. **Plugin system** — Test `discoverPlugins()` with mock directories, `PluginRun` with missing binary, `PluginList` output.
+4. **Table/ANSI** — Test `stripANSI` with 256-color and true-color sequences. Test table alignment with emoji and CJK characters.
+5. **JSON error structure** — Test that CLI errors produce JSON matching `{error, code, hint}` per §13.2.
+6. **Quiet + JSON** — Test that `--quiet` suppresses text output but `--json` still works (or document behavior).
+7. **Markdown rendering** — Test `RenderMarkdown` fallback when Glamour fails.
+8. **Config round-trip** — Test that saving then loading config preserves boolean values including `false`.
+9. **Token TTL bounds** — Test that `Refresh()` clamps extreme `expires_in` values.
+10. **New API methods** — Test all methods added in CLI-38 (mock HTTP responses).
+
+---
+
+## Completed Work (keep — do not redo)
+
+All 29+ CLI command groups wired and working. Existing files:
+- cmd/mynow/main.go (1991 lines) — root command, all subcommands, global flags
+- internal/config/config.go — YAML config, env vars, XDG (needs bool fix)
+- internal/auth/ — OAuth PKCE, API key, keyring, tokens, device stub
+- internal/api/ — 22 domain files (needs missing methods added)
+- internal/app/ — 24 domain files with --json support
+- internal/output/ — formatter, table, color, markdown, progress
+- internal/errors/ — 6 exit codes, structured errors
+- internal/util/ — date, duration, recurrence parsing
+- internal/tui/ — app shell, 12 screen files, 3 components (needs 6 screens + 13 components)
+- test/integration/ — setup, 5 test files
+- .goreleaser.yaml, .github/workflows/ (ci, integration, release)
+
+Security fixes (CLI-35), dependencies (CLI-36), arch bugs (CLI-37) all verified complete.
+
+---
+
+## Architecture Decisions (preserve)
 
 1. `TokenStore` interface for swappable keyring backends
 2. `Formatter` interface for text/JSON output switching

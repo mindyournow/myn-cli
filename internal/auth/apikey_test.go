@@ -2,7 +2,6 @@ package auth
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -46,13 +45,7 @@ func (m *mockCredStore) LoadAPIKey() (string, error) {
 }
 
 func TestAPIKeyClient_Validate_Success(t *testing.T) {
-	want := CustomerProfile{
-		ID:       "user-1",
-		Email:    "alice@example.com",
-		Username: "alice",
-		Name:     "Alice",
-	}
-
+	// Backend returns id as a number (Java Long), so use a numeric JSON payload
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/customers" {
 			http.NotFound(w, r)
@@ -63,7 +56,7 @@ func TestAPIKeyClient_Validate_Success(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(want)
+		w.Write([]byte(`{"id":1234,"email":"alice@example.com","username":"alice","firstName":"Alice"}`))
 	}))
 	defer srv.Close()
 
@@ -72,11 +65,11 @@ func TestAPIKeyClient_Validate_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Validate() error = %v", err)
 	}
-	if got.Email != want.Email {
-		t.Errorf("Validate() email = %q, want %q", got.Email, want.Email)
+	if got.Email != "alice@example.com" {
+		t.Errorf("Validate() email = %q, want %q", got.Email, "alice@example.com")
 	}
-	if got.ID != want.ID {
-		t.Errorf("Validate() id = %q, want %q", got.ID, want.ID)
+	if got.ID.String() != "1234" {
+		t.Errorf("Validate() id = %q, want %q", got.ID.String(), "1234")
 	}
 }
 
@@ -125,14 +118,9 @@ func TestAPIKeyClient_Validate_NetworkError(t *testing.T) {
 }
 
 func TestAPIKeyClient_Login_SavesKey(t *testing.T) {
-	profile := CustomerProfile{
-		ID:    "user-2",
-		Email: "bob@example.com",
-	}
-
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(profile)
+		w.Write([]byte(`{"id":5678,"email":"bob@example.com"}`))
 	}))
 	defer srv.Close()
 
@@ -144,8 +132,8 @@ func TestAPIKeyClient_Login_SavesKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Login() error = %v", err)
 	}
-	if got.Email != profile.Email {
-		t.Errorf("Login() email = %q, want %q", got.Email, profile.Email)
+	if got.Email != "bob@example.com" {
+		t.Errorf("Login() email = %q, want %q", got.Email, "bob@example.com")
 	}
 	if store.apiKey != key {
 		t.Errorf("Login() stored key = %q, want %q", store.apiKey, key)

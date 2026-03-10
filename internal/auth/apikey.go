@@ -29,10 +29,10 @@ func NewAPIKeyClient(baseURL string, store CredentialStore) *APIKeyClient {
 
 // CustomerProfile holds the user profile returned by GET /api/v1/customers.
 type CustomerProfile struct {
-	ID       string `json:"id"`
-	Email    string `json:"email"`
-	Username string `json:"username"`
-	Name     string `json:"firstName"`
+	ID       json.Number `json:"id"`
+	Email    string      `json:"email"`
+	Username string      `json:"username"`
+	Name     string      `json:"firstName"`
 }
 
 // Validate checks the API key against GET /api/v1/customers and returns the profile.

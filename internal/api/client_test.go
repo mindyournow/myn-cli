@@ -75,8 +75,8 @@ func TestClient_DoRequest_Success(t *testing.T) {
 	}
 
 	var result map[string]string
-	if err := resp.UnmarshalJSON(&result); err != nil {
-		t.Fatalf("UnmarshalJSON() error = %v", err)
+	if err := resp.DecodeJSON(&result); err != nil {
+		t.Fatalf("DecodeJSON() error = %v", err)
 	}
 
 	if result["message"] != "success" {
@@ -106,8 +106,8 @@ func TestClient_DoRequest_WithBody(t *testing.T) {
 	}
 
 	var result map[string]string
-	if err := resp.UnmarshalJSON(&result); err != nil {
-		t.Fatalf("UnmarshalJSON() error = %v", err)
+	if err := resp.DecodeJSON(&result); err != nil {
+		t.Fatalf("DecodeJSON() error = %v", err)
 	}
 
 	if result["key"] != "value" {
@@ -142,8 +142,8 @@ func TestClient_DoRequest_WithQueryParams(t *testing.T) {
 	}
 
 	var result map[string]string
-	if err := resp.UnmarshalJSON(&result); err != nil {
-		t.Fatalf("UnmarshalJSON() error = %v", err)
+	if err := resp.DecodeJSON(&result); err != nil {
+		t.Fatalf("DecodeJSON() error = %v", err)
 	}
 
 	if result["param1"] != "value1" {
@@ -175,8 +175,8 @@ func TestClient_DoRequest_WithAuthorization(t *testing.T) {
 	}
 
 	var result map[string]string
-	if err := resp.UnmarshalJSON(&result); err != nil {
-		t.Fatalf("UnmarshalJSON() error = %v", err)
+	if err := resp.DecodeJSON(&result); err != nil {
+		t.Fatalf("DecodeJSON() error = %v", err)
 	}
 
 	if result["auth"] != "Bearer test-token" {
@@ -394,14 +394,14 @@ func TestResponse_IsSuccess(t *testing.T) {
 	}
 }
 
-func TestResponse_UnmarshalJSON(t *testing.T) {
+func TestResponse_DecodeJSON(t *testing.T) {
 	r := &Response{
 		Body: []byte(`{"key": "value"}`),
 	}
 
 	var result map[string]string
-	if err := r.UnmarshalJSON(&result); err != nil {
-		t.Fatalf("UnmarshalJSON() error = %v", err)
+	if err := r.DecodeJSON(&result); err != nil {
+		t.Fatalf("DecodeJSON() error = %v", err)
 	}
 
 	if result["key"] != "value" {

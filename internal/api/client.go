@@ -256,8 +256,8 @@ func (r *Response) IsSuccess() bool {
 	return r.StatusCode >= 200 && r.StatusCode < 300
 }
 
-// UnmarshalJSON unmarshals the response body as JSON into the provided target.
-func (r *Response) UnmarshalJSON(target interface{}) error {
+// DecodeJSON unmarshals the response body as JSON into the provided target.
+func (r *Response) DecodeJSON(target interface{}) error {
 	return json.Unmarshal(r.Body, target)
 }
 

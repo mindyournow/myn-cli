@@ -56,6 +56,10 @@ ok  	github.com/mindyournow/myn-cli/internal/config	(cached)
 ok  	github.com/mindyournow/myn-cli/internal/output	(cached)
 ```
 
+## Additional Fixes
+
+- Renamed `Response.UnmarshalJSON` to `DecodeJSON` to fix go vet warning about interface signature mismatch
+
 ## Remaining Work
 
 None - all blockers addressed. Ready for re-review.

@@ -34,3 +34,11 @@ dist/
 # Editor/IDE
 .idea/
 .vscode/
+
+# Panopticon / AI tooling
+.claude/
+.planning/
+.tldr/
+.beads/
+.venv/
+workspaces/
